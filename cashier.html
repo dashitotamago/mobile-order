@@ -61,7 +61,9 @@ input{font:inherit;font-size:16px;color:var(--text);background:var(--field);bord
 .row .q.many{color:var(--text);font-weight:900}
 .row .amt{min-width:84px;text-align:right;white-space:nowrap}
 .row small{display:block;font-size:12.5px;font-weight:500;color:var(--mute)}
-.total{display:flex;justify-content:space-between;align-items:baseline;padding:18px;font-weight:900;font-size:17px}
+.sumrow{display:flex;justify-content:space-between;padding:4px 18px;font-size:15px;color:#d2ccc0}
+.sumrow.first{padding-top:16px}
+.total{display:flex;justify-content:space-between;align-items:baseline;padding:14px 18px 18px;font-weight:900;font-size:17px}
 .total b{font-size:38px;color:var(--accent);line-height:1}
 .warn{margin:0 18px 14px;padding:10px 12px;border-radius:8px;background:#4f2a21;color:#ffd9cf;font-size:14px;font-weight:700}
 .pay{display:block;width:calc(100% - 36px);margin:0 18px 18px;min-height:60px;border-radius:12px;background:var(--accent);color:var(--accent-ink);font-weight:900;font-size:19px}
@@ -93,7 +95,7 @@ input{font:inherit;font-size:16px;color:var(--text);background:var(--field);bord
 
 <header class="bar">
   <h1 id="shopName"></h1>
-  <p class="count">未会計<b id="nTables">0</b>卓 / 合計<b id="nSum">¥0</b></p>
+  <p class="count">未会計<b id="nTables">0</b>卓 / 合計<b id="nSum">0円</b></p>
   <p class="stat" id="stat">接続中…</p>
 </header>
 
@@ -114,11 +116,17 @@ input{font:inherit;font-size:16px;color:var(--text);background:var(--field);bord
 
 <script>
 /* ===== 設定(config.js で上書き) ===== */
-const CFG = Object.assign({ GAS_URL:'', SHOP_NAME:'お店の名前', PRICE_NOTE:'', CASHIER_POLL_MS:10000 }, window.MO_CONFIG || {});
+const CFG = Object.assign({ GAS_URL:'', SHOP_NAME:'お店の名前', TAX_RATE:0.10, TAX_ROUND:'floor', CASHIER_POLL_MS:10000 }, window.MO_CONFIG || {});
 const DEMO = !CFG.GAS_URL;
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
-const yen = n => '¥' + Number(n || 0).toLocaleString('ja-JP');
+const yen = n => Number(n || 0).toLocaleString('ja-JP') + '円';
+
+/* 価格は税抜で登録し、税込は自動計算する。お会計の消費税は伝票の小計に対して1回だけ計算する */
+const TAX_PM = Math.round((Number(CFG.TAX_RATE) || 0) * 1000);                       /* 税率(千分率) */
+const TAX_RND = { floor:Math.floor, ceil:Math.ceil, round:Math.round }[CFG.TAX_ROUND] || Math.floor;
+const taxOf = n => TAX_RND(Number(n || 0) * TAX_PM / 1000);
+const incl = n => Number(n || 0) + taxOf(n);
 const hm = t => new Date(t).toLocaleTimeString('ja-JP', { hour:'2-digit', minute:'2-digit' });
 const mem = {};
 const store = {
@@ -184,10 +192,11 @@ function render(){
   S.sig = sig;
   if (S.sel != null && !S.tables.some(t => t.table === S.sel)) S.sel = null;
   $('#nTables').textContent = S.tables.length;
-  $('#nSum').textContent = yen(S.tables.reduce((a, t) => a + t.total, 0));
+  $('#nSum').textContent = yen(S.tables.reduce((a, t) => a + incl(t.total), 0));
   $('#tables').innerHTML = S.tables.length ? S.tables.map(t => `<button class="tcard" data-table="${esc(t.table)}" aria-pressed="${t.table === S.sel}">
       <span class="no"><small>卓</small><b>${esc(t.table)}</b></span>
-      <span class="sum">${yen(t.total)}</span>
+      <span class="sum">${yen(incl(t.total))}</span>
+      ${TAX_PM ? `<span class="meta">税込 / 税抜 ${yen(t.total)}</span>` : ''}
       <span class="meta">${count(t)}品 / ${hm(Math.min(...t.lines.map(l => l.at)))}〜</span>
     </button>`).join('')
     : '<div class="empty"><b>未会計の卓はありません</b>注文が入ると、ここに卓ごとの金額が表示されます。</div>';
@@ -201,9 +210,10 @@ function render(){
   const waiting = t.lines.filter(l => !l.served).reduce((a, l) => a + l.qty, 0);
   d.innerHTML = `<header><small>卓</small><b>${esc(t.table)}</b><span>${hm(Math.min(...t.lines.map(l => l.at)))}〜 / ${count(t)}品</span>
       <button class="x" data-close aria-label="閉じる">✕</button></header>
-    <div class="lines">${[...agg.values()].map(a => `<div class="row"><span class="nm">${esc(a.name)}<small>${yen(a.price)}</small></span>
+    <div class="lines">${[...agg.values()].map(a => `<div class="row"><span class="nm">${esc(a.name)}<small>${TAX_PM ? '税抜 ' : ''}${yen(a.price)}</small></span>
       <span class="q${a.qty > 1 ? ' many' : ''}">×${a.qty}</span><span class="amt">${yen(a.price * a.qty)}</span></div>`).join('')}</div>
-    <div class="total"><span>お会計金額${CFG.PRICE_NOTE ? '(' + esc(CFG.PRICE_NOTE) + ')' : ''}</span><b>${yen(t.total)}</b></div>
+    ${TAX_PM ? `<div class="sumrow first"><span>小計(税抜)</span><span>${yen(t.total)}</span></div><div class="sumrow"><span>消費税(${TAX_PM / 10}%)</span><span>${yen(taxOf(t.total))}</span></div>` : ''}
+    <div class="total"><span>お会計金額${TAX_PM ? '(税込)' : ''}</span><b>${yen(incl(t.total))}</b></div>
     ${waiting ? `<p class="warn">まだ提供していない商品が${waiting}品あります。</p>` : ''}
     <button class="pay" data-pay${S.paying ? ' disabled' : ''}>${S.paying ? '処理中…' : '会計済にする'}</button>
     <p class="hint">会計済にすると、この卓の注文履歴と金額が0に戻ります。次のお客様のために、お会計のたびに押してください。</p>`;
@@ -227,7 +237,7 @@ async function pay(){
     if (!res.ok) { if (res.auth) return openGate(res.error); await poll(); render(); return snack(res.error || '会計済にできませんでした。'); }
     S.last = { table:t.table, stamp:res.stamp };
     S.tables = S.tables.filter(x => x.table !== t.table); S.sel = null; render();
-    snack(`卓${t.table} を会計済にしました(${yen(t.total)})`, true);
+    snack(`卓${t.table} を会計済にしました(${TAX_PM ? '税込 ' : ''}${yen(incl(t.total))})`, true);
   } catch (e) { S.paying = false; render(); snack('会計済にできませんでした。通信状況を確認して、もう一度押してください。'); }
 }
 $('#snackBtn').addEventListener('click', async () => {
