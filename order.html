@@ -61,7 +61,7 @@ button:disabled{cursor:default}
 .rec-card .photo{border-radius:10px}
 .cap{position:absolute;left:0;right:0;bottom:0;padding:44px 14px 12px;border-radius:0 0 10px 10px;background:linear-gradient(#0000,#000c)}
 .cap b{display:block;font-size:17px;font-weight:700}
-.cap i{font-style:normal;font-size:14px;color:#e6e0d4}
+.cap i{font-style:normal;font-size:16px;font-weight:700;color:#f0eadf}
 .dots{display:flex;justify-content:center;gap:7px;padding:12px 0 2px}
 .dots i{width:6px;height:6px;border-radius:50%;background:var(--line)}
 .dots i.on{background:#f0683a}
@@ -81,7 +81,14 @@ button:disabled{cursor:default}
 .grid{display:grid;grid-template-columns:1fr 1fr;gap:18px 10px}
 .item{display:block;width:100%;text-align:left;min-width:0}
 .item .nm{display:block;font-weight:700;font-size:15px;line-height:1.3;margin-top:8px}
-.item .pr{display:block;color:var(--mute);font-size:14px;margin-top:2px}
+.item .pr{display:block;color:#e9e3d7;font-size:16px;font-weight:700;margin-top:3px;line-height:1.3}
+.taxnote{padding-top:14px;margin-bottom:-6px;font-size:12px;color:var(--mute);text-align:right}
+.tin{display:inline-block;margin-left:3px;font-size:12px;font-weight:500;color:var(--mute);white-space:nowrap}
+.cap .tin{color:#cfc9bd}
+.primary .tin,.cartbar .tin{color:inherit;opacity:.75;font-size:12px}
+.sumrow{display:flex;justify-content:space-between;padding:4px 2px;font-size:14px;color:#d2ccc0}
+.sumrow.first{padding-top:16px}
+.sumrow+.bill{margin-top:10px}
 .badge{position:absolute;left:0;bottom:10px;z-index:1;padding:3px 10px 3px 8px;border-radius:0 3px 3px 0;
   background:var(--hot);color:#fff;font-size:11px;font-weight:700}
 .item.sold .photo::after{content:"";position:absolute;inset:0;background:#000000a8}
@@ -98,7 +105,8 @@ button:disabled{cursor:default}
   display:flex;align-items:center;gap:10px;padding:15px 18px;border-radius:14px;
   background:var(--accent);color:var(--accent-ink);font-weight:900;font-size:16px;box-shadow:0 8px 24px #000a}
 .cartbar .n{min-width:26px;height:26px;padding:0 7px;border-radius:13px;display:grid;place-items:center;background:var(--accent-ink);color:var(--accent);font-size:14px}
-.cartbar .sum{margin-left:auto}
+.cartbar{white-space:nowrap}
+.cartbar .sum{margin-left:auto;white-space:normal;text-align:right;line-height:1.25}
 
 /* シート */
 .scrim{position:fixed;inset:0;z-index:40;background:#000b;opacity:0;pointer-events:none;transition:opacity .2s}
@@ -119,7 +127,8 @@ button:disabled{cursor:default}
 .detail .photo{aspect-ratio:4/3;border-radius:10px}
 .detail .ph span{font-size:30px;font-size:10cqw}
 .detail h4{font-size:20px;font-weight:900;margin-top:14px}
-.detail .pr{color:var(--mute);font-size:16px;margin-top:2px}
+.detail .pr{color:#e9e3d7;font-size:19px;font-weight:700;margin-top:2px}
+.detail .tin{font-size:13px}
 .detail .desc{font-size:14px;color:#d2ccc0;margin-top:10px}
 .note{display:block;margin-top:16px;font-size:12px;color:var(--mute)}
 .note input{display:block;width:100%;margin-top:6px;padding:12px;border-radius:8px;border:1px solid var(--line);
@@ -190,7 +199,7 @@ button:disabled{cursor:default}
 
 <script>
 /* ===== 設定(config.js で上書き) ===== */
-const CFG = Object.assign({ GAS_URL:'', SHOP_NAME:'お店の名前', ALLOW_NOTE:false, PRICE_NOTE:'' }, window.MO_CONFIG || {});
+const CFG = Object.assign({ GAS_URL:'', SHOP_NAME:'お店の名前', ALLOW_NOTE:false, TAX_RATE:0.10, TAX_ROUND:'floor', TAX_NOTE:'( )内は税込価格です' }, window.MO_CONFIG || {});
 const DEMO = !CFG.GAS_URL;
 const TABLE = (new URLSearchParams(location.search).get('t') || (DEMO ? 'デモ' : '')).trim().slice(0, 20);
 
@@ -220,7 +229,22 @@ const DEMO_MENU = [
 /* ===== 小道具 ===== */
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
-const yen = n => '¥' + Number(n || 0).toLocaleString('ja-JP');
+const num = n => Number(n || 0).toLocaleString('ja-JP');
+const yen = n => num(n) + '円';
+
+/* 価格は税抜で登録し、税込は自動計算する。お会計の消費税は伝票の小計に対して1回だけ計算する */
+const TAX_PM = Math.round((Number(CFG.TAX_RATE) || 0) * 1000);                       /* 税率(千分率) */
+const TAX_RND = { floor:Math.floor, ceil:Math.ceil, round:Math.round }[CFG.TAX_ROUND] || Math.floor;
+const taxOf = n => TAX_RND(Number(n || 0) * TAX_PM / 1000);
+const incl = n => Number(n || 0) + taxOf(n);
+/* 税抜を大きく、税込を( )で小さく 例:780円(858) */
+const price = n => TAX_PM ? `${yen(n)}<small class="tin">(${num(incl(n))})</small>` : yen(n);
+function totals(sub, label){
+  if (!TAX_PM) return `<div class="bill"><span>${label}</span><b>${yen(sub)}</b></div>`;
+  return `<div class="sumrow first"><span>小計(税抜)</span><span>${yen(sub)}</span></div>
+    <div class="sumrow"><span>消費税(${TAX_PM / 10}%)</span><span>${yen(taxOf(sub))}</span></div>
+    <div class="bill"><span>${label}(税込)</span><b>${yen(incl(sub))}</b></div>`;
+}
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 const mem = {};
 const store = {
@@ -300,12 +324,12 @@ function renderAll(){
   $('#rec').hidden = !rec.length;
   $('#recTrack').innerHTML = rec.map(m =>
     `<button class="rec-card" data-act="item" data-id="${esc(m.id)}"><span class="photo">${tile(m)}</span>
-     <span class="cap"><b>${esc(m.name)}</b><i>${yen(m.price)}</i></span></button>`).join('');
+     <span class="cap"><b>${esc(m.name)}</b><i>${price(m.price)}</i></span></button>`).join('');
   $('#recDots').innerHTML = rec.length > 1 ? rec.map((_, i) => `<i${i ? '' : ' class="on"'}></i>`).join('') : '';
 
   const items = shown(), cats = [...new Set(items.map(m => m.cat))];
   $('#side').innerHTML = cats.map((c, i) => `<button data-act="jump" data-i="${i}" aria-current="${i === 0}">${esc(c)}</button>`).join('');
-  $('#list').innerHTML = cats.length ? cats.map((c, i) =>
+  $('#list').innerHTML = cats.length ? (TAX_PM && CFG.TAX_NOTE ? `<p class="taxnote">${esc(CFG.TAX_NOTE)}</p>` : '') + cats.map((c, i) =>
     `<section class="cat" id="cat-${i}"><h2>${esc(c)}</h2><div class="grid">${items.filter(m => m.cat === c).map(card).join('')}</div></section>`).join('')
     : '<p class="state">表示できる商品がありません。</p>';
   updateDots(); renderCartbar();
@@ -313,7 +337,7 @@ function renderAll(){
 function card(m){
   return `<button class="item${m.sold ? ' sold' : ''}" data-act="item" data-id="${esc(m.id)}"${m.sold ? ' disabled' : ''}>
     <span class="photo">${tile(m)}${m.badge && !m.sold ? `<span class="badge">${esc(m.badge)}</span>` : ''}${m.sold ? '<span class="stamp">売り切れ</span>' : ''}<span class="qty-dot" hidden></span></span>
-    <span class="nm">${esc(m.name)}</span><span class="pr">${yen(m.price)}</span></button>`;
+    <span class="nm">${esc(m.name)}</span><span class="pr">${price(m.price)}</span></button>`;
 }
 function updateDots(){
   document.querySelectorAll('.item').forEach(el => {
@@ -323,7 +347,7 @@ function updateDots(){
 }
 function renderCartbar(){
   const n = cartCount();
-  $('#cartbar').hidden = !n; $('#cartN').textContent = n; $('#cartSum').textContent = yen(cartTotal());
+  $('#cartbar').hidden = !n; $('#cartN').textContent = n; $('#cartSum').innerHTML = price(cartTotal());
 }
 
 /* ===== シート ===== */
@@ -343,16 +367,16 @@ function openItem(id){
   S.view = 'item'; S.draft = { id, qty:1 };
   sheet('商品を追加', `<div class="detail">
       <span class="photo">${tile(m)}</span>
-      <h4>${esc(m.name)}</h4><p class="pr">${yen(m.price)}</p>
+      <h4>${esc(m.name)}</h4><p class="pr">${price(m.price)}</p>
       ${m.desc ? `<p class="desc">${esc(m.desc)}</p>` : ''}
       ${CFG.ALLOW_NOTE ? `<label class="note">お店へのメモ(任意)<input id="note" maxlength="40" placeholder="例:氷なし" value="${esc(S.cart[id]?.note || '')}"></label>` : ''}
       <div class="stepper"><button data-act="d-dec" aria-label="減らす">−</button><output id="dQty">1</output><button data-act="d-inc" aria-label="増やす">＋</button></div>
     </div>`,
-    `<button class="primary" data-act="add">カートに入れる<span id="dSum">${yen(m.price)}</span></button>`);
+    `<button class="primary" data-act="add">カートに入れる<span id="dSum">${price(m.price)}</span></button>`);
 }
 function draftStep(d){
   S.draft.qty = Math.max(1, Math.min(99, S.draft.qty + d));
-  $('#dQty').textContent = S.draft.qty; $('#dSum').textContent = yen(S.draft.qty * byId(S.draft.id).price);
+  $('#dQty').textContent = S.draft.qty; $('#dSum').innerHTML = price(S.draft.qty * byId(S.draft.id).price);
 }
 function addDraft(){
   const { id, qty } = S.draft, note = $('#note') ? $('#note').value.trim() : (S.cart[id]?.note || '');
@@ -368,7 +392,7 @@ function openCart(msg){
       <div class="t"><b>${esc(m.name)}</b><small>${yen(m.price)}${l.note ? ' / ' + esc(l.note) : ''}</small></div>
       <div class="stepper"><button data-act="dec" data-id="${esc(l.id)}" aria-label="減らす">−</button><output>${l.qty}</output><button data-act="inc" data-id="${esc(l.id)}" aria-label="増やす">＋</button></div>
     </div>`; }).join('')
-    + `<div class="total"><span>合計</span><span>${yen(cartTotal())}</span></div>
+    + `${totals(cartTotal(), '合計')}
        <p class="hint">お会計はお帰りの際にレジでお願いします。</p>
        ${msg ? `<p class="err">${esc(msg)}</p>` : ''}`,
     `<button class="primary" data-act="send"${S.sending || !TABLE ? ' disabled' : ''}>${S.sending ? '送信中…' : '注文を確定する'}</button>`);
@@ -417,7 +441,7 @@ async function openHistory(){
   const body = [...orders.values()].map(ls =>
       `<p class="when">${new Date(ls[0].at).toLocaleTimeString('ja-JP', { hour:'2-digit', minute:'2-digit' })} のご注文</p>`
       + ls.map(l => `<div class="row"><div class="t"><b>${esc(l.name)}${l.served ? '' : '<span class="wait">準備中</span>'}</b><small>${yen(l.price)} × ${l.qty}</small></div><span class="amt">${yen(l.price * l.qty)}</span></div>`).join('')).join('')
-    + `<div class="bill"><span>お会計金額${CFG.PRICE_NOTE ? '(' + esc(CFG.PRICE_NOTE) + ')' : ''}</span><b>${yen(res.total)}</b></div>
+    + `${totals(res.total, 'お会計金額')}
        <p class="hint">この卓のご注文をまとめて表示しています。お会計はレジで、卓番号「${esc(TABLE)}」をお伝えください。</p>`;
   sheet(title, body);
 }
