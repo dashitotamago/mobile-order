@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>卓上QRコード作成</title>
+<script src="config.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<style>
+*{box-sizing:border-box;margin:0}
+body{font-family:"Hiragino Sans","Noto Sans JP","Yu Gothic UI",sans-serif;background:#f3f1ec;color:#231f1a;line-height:1.5;padding:20px}
+.panel{max-width:720px;margin:0 auto 24px;padding:20px;background:#fff;border-radius:12px}
+h1{font-size:20px;margin-bottom:14px}
+label{display:block;font-size:13px;font-weight:700;margin-top:14px}
+input,textarea{display:block;width:100%;margin-top:6px;padding:10px;border:1px solid #c9c4b8;border-radius:8px;font:inherit;font-size:16px}
+textarea{height:150px}
+.help{font-size:12.5px;color:#6b665c;margin-top:4px;font-weight:400}
+.btns{display:flex;gap:10px;margin-top:18px}
+button{font:inherit;font-weight:700;padding:12px 22px;border-radius:10px;border:0;background:#231f1a;color:#fff;cursor:pointer}
+button.sub{background:#e4e0d6;color:#231f1a}
+.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:16px;max-width:1000px;margin:0 auto}
+.card{background:#fff;border:2px solid #231f1a;border-radius:14px;padding:18px 16px;text-align:center;break-inside:avoid}
+.card .shop{font-size:14px;font-weight:700}
+.card .qr{display:grid;place-items:center;margin:12px 0}
+.card .qr img,.card .qr canvas{width:180px;height:180px}
+.card .how{font-size:13px}
+.card .no{margin-top:8px;font-size:15px;font-weight:700}
+.card .no b{font-size:30px;margin-left:6px}
+@media print{
+  body{background:#fff;padding:0}.panel{display:none}
+  .cards{grid-template-columns:repeat(3,1fr);gap:8mm}
+}
+</style>
+</head>
+<body>
+<div class="panel">
+  <h1>卓上QRコードを作る</h1>
+  <label>注文ページのURL
+    <input id="base" inputmode="url">
+    <span class="help">GitHub Pages に置いた order.html のURLです。</span>
+  </label>
+  <label>卓の名前(1行に1つ)
+    <textarea id="tables"></textarea>
+    <span class="help">「1」「2」のほか「カウンター1」「座敷A」のような名前も使えます。</span>
+  </label>
+  <div class="btns"><button id="make">QRコードを作る</button><button class="sub" id="print">印刷する</button></div>
+</div>
+<div class="cards" id="cards"></div>
+<script>
+const CFG = Object.assign({ SHOP_NAME:'お店の名前' }, window.MO_CONFIG || {});
+const $ = s => document.querySelector(s);
+$('#base').value = location.href.split(/[?#]/)[0].replace(/[^/]*$/, 'order.html');
+$('#tables').value = Array.from({ length:8 }, (_, i) => i + 1).join('\n');
+function make(){
+  const base = $('#base').value.trim(), box = $('#cards'); box.textContent = '';
+  $('#tables').value.split('\n').map(s => s.trim()).filter(Boolean).forEach(t => {
+    const card = document.createElement('div'); card.className = 'card';
+    const shop = document.createElement('p'); shop.className = 'shop'; shop.textContent = CFG.SHOP_NAME;
+    const qr = document.createElement('div'); qr.className = 'qr';
+    const how = document.createElement('p'); how.className = 'how'; how.textContent = 'スマートフォンで読み取ってご注文ください';
+    const no = document.createElement('p'); no.className = 'no'; no.append('卓'); const b = document.createElement('b'); b.textContent = t; no.append(b);
+    card.append(shop, qr, how, no); box.append(card);
+    if (window.QRCode) new QRCode(qr, { text:base + '?t=' + encodeURIComponent(t), width:360, height:360, correctLevel:QRCode.CorrectLevel.M });
+    else qr.textContent = 'QRコードを作れませんでした。通信状況を確認して読み込み直してください。';
+  });
+}
+$('#make').addEventListener('click', make);
+$('#print').addEventListener('click', () => print());
+make();
+</script>
+</body>
+</html>

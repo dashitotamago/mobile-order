@@ -1,0 +1,231 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#262422">
+<meta name="robots" content="noindex">
+<title>注文確認(厨房)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@500;700;900&display=swap" rel="stylesheet">
+<script src="config.js"></script>
+<style>
+:root{
+  --bg:#1d1c1a; --bar:#262422; --panel:#322f2c; --head:#3d3a35; --chip:#45413c;
+  --text:#f6f2e9; --mute:#a59f93; --accent:#f6b400; --accent-ink:#221b00; --alert:#ff7a5c;
+  color-scheme:dark;
+}
+*{box-sizing:border-box;margin:0}
+body{font-family:"Zen Kaku Gothic New","Hiragino Sans","Noto Sans JP","Yu Gothic UI",sans-serif;font-weight:500;
+  background:var(--bg);color:var(--text);line-height:1.4;min-height:100dvh;-webkit-tap-highlight-color:transparent;
+  padding-bottom:calc(90px + env(safe-area-inset-bottom))}
+button{font:inherit;color:inherit;background:none;border:0;padding:0;cursor:pointer}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+[hidden]{display:none!important}
+
+.bar{position:sticky;top:0;z-index:10;display:flex;align-items:center;flex-wrap:wrap;gap:6px 18px;
+  padding:calc(10px + env(safe-area-inset-top)) 18px 10px;background:var(--bar);box-shadow:0 1px 0 #0008}
+.bar h1{font-size:18px;font-weight:900}
+.bar .count{font-size:15px;color:var(--mute)}
+.bar .count b{font-size:22px;font-weight:900;color:var(--accent);margin:0 3px}
+.stat{margin-left:auto;display:flex;align-items:center;gap:8px;font-size:13px;color:var(--mute)}
+.stat::before{content:"";width:10px;height:10px;border-radius:50%;background:#58c27d}
+.stat.off{color:var(--alert);font-weight:700}
+.stat.off::before{background:var(--alert)}
+
+.board{display:grid;grid-template-columns:repeat(auto-fill,minmax(310px,1fr));gap:14px;padding:14px;align-items:start}
+.tbl{background:var(--panel);border-radius:12px;overflow:hidden}
+.tbl>header{display:flex;align-items:baseline;gap:8px;padding:10px 14px;background:var(--head)}
+.tbl>header small{font-size:13px;color:var(--mute)}
+.tbl>header b{font-size:28px;font-weight:900;line-height:1.1}
+.tbl>header span{margin-left:auto;font-size:13px;color:var(--mute)}
+.line{display:flex;align-items:center;gap:10px;padding:10px 10px 10px 14px;border-top:1px solid #ffffff12}
+.what{flex:1;min-width:0}
+.nm{font-size:19px;font-weight:700}
+.q{margin-left:8px;font-size:17px;color:var(--mute);white-space:nowrap}
+.q.many{font-size:23px;font-weight:900;color:var(--accent)}
+.memo{display:block;font-size:14px;color:#ffcf99}
+.el{min-width:46px;text-align:right;font-size:13px;color:var(--mute)}
+.el.warn{color:var(--accent);font-weight:700}
+.el.late{color:var(--alert);font-weight:900}
+.serve{flex:none;min-width:94px;min-height:54px;padding:0 12px;border-radius:10px;background:var(--accent);color:var(--accent-ink);font-weight:900;font-size:16px}
+.serve:active{transform:scale(.97)}
+.line.call{background:#4f2a21}
+.line.call .nm{color:#ffd9cf}
+.line.call .serve{background:var(--alert);color:#2a0c05}
+.line.new{animation:flash 1s ease-out 3}
+@keyframes flash{0%{box-shadow:inset 0 0 0 100px #f6b40055}100%{box-shadow:inset 0 0 0 100px #f6b40000}}
+.empty{grid-column:1/-1;padding:18vh 20px;text-align:center;color:var(--mute);font-size:16px}
+.empty b{display:block;font-size:22px;font-weight:900;color:var(--text);margin-bottom:8px}
+
+.snack{position:fixed;left:50%;bottom:calc(18px + env(safe-area-inset-bottom));z-index:20;transform:translate(-50%,160%);
+  display:flex;align-items:center;gap:14px;max-width:92vw;padding:10px 10px 10px 20px;border-radius:14px;
+  background:#f6f2e9;color:#231f1a;font-weight:700;font-size:15px;box-shadow:0 8px 24px #000a;transition:transform .2s}
+.snack.on{transform:translate(-50%,0)}
+.snack button{flex:none;min-height:46px;padding:0 18px;border-radius:10px;background:#231f1a;color:#f6f2e9;font-weight:900}
+
+.gate{position:fixed;inset:0;z-index:30;display:grid;place-content:center;justify-items:center;gap:14px;padding:24px;
+  background:#1d1c1af2;text-align:center}
+.gate h2{font-size:24px;font-weight:900}
+.gate p{color:var(--mute);font-size:15px;max-width:26em}
+.gate button{margin-top:8px;padding:18px 44px;border-radius:14px;background:var(--accent);color:var(--accent-ink);font-weight:900;font-size:19px}
+@media (prefers-reduced-motion:reduce){.line.new{animation:none}.snack{transition:none}}
+</style>
+</head>
+<body>
+
+<header class="bar">
+  <h1 id="shopName"></h1>
+  <p class="count">未提供<b id="nItems">0</b>品 /<b id="nTables">0</b>卓</p>
+  <p class="stat" id="stat">接続中…</p>
+</header>
+
+<main class="board" id="board"></main>
+
+<div class="snack" id="snack" role="status"><span id="snackText"></span><button id="snackBtn" hidden>取り消す</button></div>
+
+<div class="gate" id="gate">
+  <h2>注文の受付を始めます</h2>
+  <p>ボタンを押すと、新しい注文が入ったときに通知音が鳴るようになります。タブレットの音量を上げておいてください。</p>
+  <button id="start">受付を始める</button>
+</div>
+
+<script>
+/* ===== 設定(config.js で上書き) ===== */
+const CFG = Object.assign({ GAS_URL:'', SHOP_NAME:'お店の名前', POLL_MS:5000, WARN_MIN:10, LATE_MIN:20 }, window.MO_CONFIG || {});
+const DEMO = !CFG.GAS_URL;
+
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
+const mem = {};
+const store = {
+  get(k, d){ try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch (e) { return k in mem ? mem[k] : d; } },
+  set(k, v){ mem[k] = v; try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
+};
+
+/* ===== 通信(GAS未設定のときはデモ) ===== */
+if (DEMO && !store.get('mo_demo_seeded', false)) {
+  const t = Date.now(), L = (table, name, qty, min, extra) => Object.assign({ lineId:'s' + Math.random().toString(36).slice(2, 9), orderId:'', at:t - min * 60000, table, name, qty, note:'', call:false }, extra);
+  store.set('mo_demo_orders', [...store.get('mo_demo_orders', []),
+    L('3', '出汁巻き玉子', 1, 12), L('3', '生ビール', 2, 12), L('5', '刺身三種盛り', 1, 6), L('5', 'ハイボール', 1, 6, { note:'氷少なめ' }),
+    L('5', '枝豆', 1, 2), L('1', 'スタッフ呼び出し', 1, 1, { call:true })]);
+  store.set('mo_demo_seeded', true);
+}
+const api = DEMO ? {
+  async orders(){ return { ok:true, now:Date.now(), items:store.get('mo_demo_orders', []).filter(x => !x.served) }; },
+  async serve(lineId, served){
+    const all = store.get('mo_demo_orders', []), x = all.find(i => i.lineId === lineId);
+    if (x) x.served = served; store.set('mo_demo_orders', all); return { ok:true };
+  }
+} : {
+  async orders(){ return (await fetch(CFG.GAS_URL + '?action=orders&_=' + Date.now())).json(); },
+  async serve(lineId, served){
+    const r = await fetch(CFG.GAS_URL, { method:'POST', headers:{ 'Content-Type':'text/plain;charset=utf-8' }, body:JSON.stringify({ action:'serve', lineId, served }) });
+    return r.json();
+  }
+};
+
+/* ===== 状態 ===== */
+let items = [], known = null, sig = null, offset = 0, last = null;
+const hide = new Map();      /* 提供済にした直後の行(通信の行き違いで再表示されないように) */
+const fresh = new Set();     /* 届いたばかりの行(点滅させる) */
+
+async function poll(){
+  try {
+    const res = await api.orders(); if (!res.ok) throw new Error(res.error);
+    offset = (res.now || Date.now()) - Date.now();
+    const now = Date.now(); hide.forEach((v, k) => { if (v < now) hide.delete(k); });
+    const list = res.items.filter(i => !hide.has(i.lineId));
+    if (known) {
+      const nw = list.filter(i => !known.has(i.lineId));
+      if (nw.length) { nw.forEach(i => { fresh.add(i.lineId); setTimeout(() => fresh.delete(i.lineId), 5000); }); beep(nw.some(i => i.call)); }
+    }
+    known = new Set(list.map(i => i.lineId)); items = list; render();
+    $('#stat').className = 'stat';
+    $('#stat').textContent = (DEMO ? 'デモ表示中 ' : '') + '更新 ' + new Date().toLocaleTimeString('ja-JP');
+  } catch (e) {
+    $('#stat').className = 'stat off'; $('#stat').textContent = '通信できません。Wi-Fiを確認してください';
+  }
+}
+function loop(){ poll().finally(() => setTimeout(loop, document.hidden ? 15000 : CFG.POLL_MS)); }
+
+/* ===== 描画 ===== */
+function render(){
+  const s = items.map(i => i.lineId + ':' + i.qty).join('|');
+  if (s === sig) return tick();
+  sig = s;
+  const by = new Map();
+  items.slice().sort((a, b) => a.at - b.at).forEach(i => { if (!by.has(i.table)) by.set(i.table, []); by.get(i.table).push(i); });
+  $('#board').innerHTML = by.size ? [...by].map(([t, ls]) => `<section class="tbl">
+      <header><small>卓</small><b>${esc(t)}</b>${ls.some(i => !i.call) ? `<span>${ls.filter(i => !i.call).reduce((a, i) => a + i.qty, 0)}品</span>` : ''}</header>
+      ${ls.map(i => `<div class="line${i.call ? ' call' : ''}${fresh.has(i.lineId) ? ' new' : ''}">
+        <div class="what"><span class="nm">${esc(i.name)}</span>${i.call ? '' : `<span class="q${i.qty > 1 ? ' many' : ''}">×${i.qty}</span>`}
+          ${i.note ? `<span class="memo">${esc(i.note)}</span>` : ''}</div>
+        <span class="el" data-at="${i.at}"></span>
+        <button class="serve" data-serve="${esc(i.lineId)}">${i.call ? '対応済' : '提供済'}</button>
+      </div>`).join('')}
+    </section>`).join('')
+    : '<div class="empty"><b>未提供の注文はありません</b>新しい注文が入ると、ここに卓ごとに表示されます。</div>';
+  $('#nItems').textContent = items.filter(i => !i.call).reduce((a, i) => a + i.qty, 0);
+  $('#nTables').textContent = by.size;
+  tick();
+}
+function tick(){
+  const now = Date.now() + offset;
+  document.querySelectorAll('[data-at]').forEach(el => {
+    const m = Math.max(0, Math.floor((now - el.dataset.at) / 60000));
+    el.textContent = m < 1 ? 'いま' : m + '分前';
+    el.className = 'el' + (m >= CFG.LATE_MIN ? ' late' : m >= CFG.WARN_MIN ? ' warn' : '');
+  });
+}
+setInterval(tick, 20000);
+
+/* ===== 提供済 / 取り消し ===== */
+$('#board').addEventListener('click', e => { const b = e.target.closest('[data-serve]'); if (b) serve(b.dataset.serve); });
+function serve(id){
+  const it = items.find(i => i.lineId === id); if (!it) return;
+  hide.set(id, Date.now() + 20000); items = items.filter(i => i.lineId !== id); known && known.delete(id); render();
+  it.done = api.serve(id, true).then(r => { if (!r.ok) throw new Error(r.error); });
+  it.done.catch(() => { if (last === it) last = null; restore(it); snack(`卓${it.table}「${it.name}」を更新できませんでした。もう一度押してください。`); });
+  last = it; snack(`卓${it.table}「${it.name}」を${it.call ? '対応済' : '提供済'}にしました`, true);
+}
+function restore(it){
+  hide.delete(it.lineId); if (!items.some(i => i.lineId === it.lineId)) items.push(it);
+  known && known.add(it.lineId); render();
+}
+$('#snackBtn').addEventListener('click', async () => {
+  const it = last; last = null; $('#snack').classList.remove('on'); if (!it) return;
+  restore(it);
+  try { await it.done.catch(() => {}); const r = await api.serve(it.lineId, false); if (!r.ok) throw 0; }
+  catch (e) { snack('取り消せませんでした。通信状況を確認してください。'); }
+});
+function snack(text, undo){
+  $('#snackText').textContent = text; $('#snackBtn').hidden = !undo; $('#snack').classList.add('on');
+  clearTimeout(snack.t); snack.t = setTimeout(() => { $('#snack').classList.remove('on'); if (undo) last = null; }, undo ? 6000 : 4000);
+}
+
+/* ===== 通知音・画面の常時点灯 ===== */
+let ac = null;
+function beep(isCall){
+  if (!ac) return;
+  const t = ac.currentTime + 0.02;
+  (isCall ? [988, 988, 988] : [659, 880]).forEach((f, i) => {
+    const o = ac.createOscillator(), g = ac.createGain(), s = t + i * 0.24;
+    o.type = 'triangle'; o.frequency.value = f;
+    g.gain.setValueAtTime(0.0001, s); g.gain.exponentialRampToValueAtTime(0.6, s + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, s + 0.22);
+    o.connect(g).connect(ac.destination); o.start(s); o.stop(s + 0.24);
+  });
+}
+async function keepAwake(){ try { if ('wakeLock' in navigator) await navigator.wakeLock.request('screen'); } catch (e) {} }
+$('#start').addEventListener('click', () => {
+  try { ac = new (window.AudioContext || window.webkitAudioContext)(); ac.resume(); beep(false); } catch (e) {}
+  keepAwake(); $('#gate').hidden = true;
+});
+document.addEventListener('visibilitychange', () => { if (!document.hidden) { keepAwake(); if (ac) ac.resume(); } });
+
+$('#shopName').textContent = CFG.SHOP_NAME + ' 注文確認';
+loop();
+</script>
+</body>
+</html>
