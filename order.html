@@ -272,7 +272,12 @@ function columns(name){
   return out.join('<br>');
 }
 const tile = m => `<span class="ph" style="--h:${hue(m.cat)}"><span>${columns(m.name)}</span></span>`
-  + (m.img ? `<img src="${esc(m.img)}" alt="" loading="lazy" onerror="this.remove()">` : '');
+  + (m.img ? `<img src="${esc(m.img)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="imgFail(this)">` : '');
+function imgFail(el){   /* 写真の配信元を1回だけ切り替えて再試行し、だめなら品名タイルに戻す */
+  const m = el.src.match(/^https:\/\/lh3\.googleusercontent\.com\/d\/([\w-]+)/);
+  if (m && !el.dataset.retry) { el.dataset.retry = 1; el.src = 'https://drive.google.com/thumbnail?id=' + m[1] + '&sz=w800'; }
+  else el.remove();
+}
 const shown = () => S.group === 'all' ? S.menu : S.menu.filter(m => m.group === S.group);
 
 function renderAll(){
