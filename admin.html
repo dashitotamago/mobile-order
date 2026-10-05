@@ -57,7 +57,8 @@ main{max-width:920px;margin:0 auto;padding:6px 12px}
 .nm{width:100%;font-weight:700}
 .row2{display:flex;flex-wrap:wrap;align-items:center;gap:8px 14px}
 .yen{display:flex;align-items:center;gap:4px;color:var(--mute)}
-.yen input{width:92px;text-align:right}
+.yen{font-size:13px}
+.yen input{width:84px;text-align:right}
 .ck{display:flex;align-items:center;gap:5px;font-size:13px;color:#d9d3c7}
 .item>.mv{grid-column:4}
 .more{grid-column:1/-1;display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:12px;border-radius:10px;background:#00000030}
@@ -121,11 +122,25 @@ main{max-width:920px;margin:0 auto;padding:6px 12px}
 
 <script>
 /* ===== 設定(config.js で上書き) ===== */
-const CFG = Object.assign({ GAS_URL:'', SHOP_NAME:'お店の名前' }, window.MO_CONFIG || {});
+const CFG = Object.assign({ GAS_URL:'', SHOP_NAME:'お店の名前', TAX_RATE:0.10, TAX_ROUND:'floor' }, window.MO_CONFIG || {});
 const DEMO = !CFG.GAS_URL;
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+
+/* 価格は税抜で登録し、税込は自動計算する。お会計の消費税は伝票の小計に対して1回だけ計算する */
+const TAX_PM = Math.round((Number(CFG.TAX_RATE) || 0) * 1000);                       /* 税率(千分率) */
+const TAX_RND = { floor:Math.floor, ceil:Math.ceil, round:Math.round }[CFG.TAX_ROUND] || Math.floor;
+const taxOf = n => TAX_RND(Number(n || 0) * TAX_PM / 1000);
+const incl = n => Number(n || 0) + taxOf(n);
+const digits = s => String(s).replace(/[０-９]/g, d => '０１２３４５６７８９'.indexOf(d)).replace(/[^\d]/g, '');
+/* 税込金額から、その税込になる(なければ最も近い)税抜金額を求める */
+function exFromInc(inc){
+  const g = Math.round(inc * 1000 / (1000 + TAX_PM));
+  let best = g, diff = Infinity;
+  for (let e = Math.max(0, g - 3); e <= g + 3; e++) { const d = Math.abs(incl(e) - inc); if (d < diff) { diff = d; best = e; } }
+  return best;
+}
 const mem = {};
 const store = {
   get(k, d){ try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch (e) { return k in mem ? mem[k] : d; } },
@@ -194,7 +209,8 @@ function itemHtml(it, ci, ii, n){
     <div class="main">
       <input class="nm" data-f="name" value="${esc(it.name)}" placeholder="商品名" aria-label="商品名">
       <div class="row2">
-        <label class="yen">¥<input data-f="price" inputmode="numeric" value="${esc(it.price)}" aria-label="価格"></label>
+        <label class="yen">${TAX_PM ? '税抜' : ''}<input data-f="price" inputmode="numeric" value="${esc(it.price)}" aria-label="価格(税抜)">円</label>
+        ${TAX_PM ? `<label class="yen">税込<input data-inc inputmode="numeric" value="${it.price === '' ? '' : incl(it.price)}" aria-label="価格(税込)">円</label>` : ''}
         <label class="ck"><input type="checkbox" data-f="rec"${it.rec ? ' checked' : ''}>おすすめ</label>
         <label class="ck"><input type="checkbox" data-f="sold"${it.sold ? ' checked' : ''}>売り切れ</label>
         <label class="ck"><input type="checkbox" data-f="hidden"${it.hidden ? ' checked' : ''}>非表示</label>
@@ -242,16 +258,32 @@ const where = el => { const it = el.closest('.item'), sec = el.closest('.cat'); 
 $('#cats').addEventListener('input', e => {
   const el = e.target, { ci, ii } = where(el);
   if (el.dataset.cf) { S.cats[ci][el.dataset.cf] = el.value; return setDirty(); }
+  if ('inc' in el.dataset && ii >= 0) {   /* 税込を入力 → 税抜を自動で出す */
+    const item = S.cats[ci].items[ii], v = digits(el.value);
+    item.price = v === '' ? '' : String(exFromInc(+v));
+    el.closest('.item').querySelector('[data-f="price"]').value = item.price;
+    return setDirty();
+  }
   const f = el.dataset.f; if (!f || ii < 0) return;
   const it = S.cats[ci].items[ii];
   if (el.type === 'checkbox') { it[f] = el.checked; if (f === 'hidden') el.closest('.item').classList.toggle('off', el.checked); }
-  else if (f === 'price') it.price = el.value.replace(/[０-９]/g, d => '０１２３４５６７８９'.indexOf(d)).replace(/[^\d]/g, '');
+  else if (f === 'price') {   /* 税抜を入力 → 税込を自動で出す */
+    it.price = digits(el.value);
+    const inc = el.closest('.item').querySelector('[data-inc]'); if (inc) inc.value = it.price === '' ? '' : incl(it.price);
+  }
   else { it[f] = el.value; if (f === 'img') refreshThumb(it); }
   setDirty();
 });
 $('#cats').addEventListener('change', e => {
   const el = e.target;
   if (el.dataset.cf) return refreshLists();
+  if ('inc' in el.dataset) {   /* 入力し終えたら、実際の税込金額にそろえる */
+    const p = where(el), item = S.cats[p.ci].items[p.ii], typed = digits(el.value);
+    if (item.price === '') return;
+    const real = incl(item.price); el.value = real;
+    if (typed !== '' && +typed !== real) snack(`税込${(+typed).toLocaleString('ja-JP')}円ちょうどになる税抜価格がないため、税抜${Number(item.price).toLocaleString('ja-JP')}円・税込${real.toLocaleString('ja-JP')}円にしました。`);
+    return;
+  }
   if (!('move' in el.dataset)) return;
   const { ci, ii } = where(el), to = +el.value; if (to === ci) return;
   S.cats[to].items.push(S.cats[ci].items.splice(ii, 1)[0]); setDirty(); render();
