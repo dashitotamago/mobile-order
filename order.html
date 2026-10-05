@@ -136,6 +136,10 @@ button:disabled{cursor:default}
 .hint{font-size:12.5px;color:var(--mute);margin-top:8px}
 .err{margin-top:12px;padding:10px 12px;border-radius:8px;background:#4a2a22;color:#ffd9cf;font-size:13.5px}
 .when{font-size:12px;color:var(--mute);padding-top:14px}
+.amt{white-space:nowrap}
+.wait{display:inline-block;margin-left:8px;padding:0 7px;border-radius:99px;background:var(--chip);color:#d9d3c7;font-size:11px;font-weight:700;vertical-align:1px}
+.bill{display:flex;justify-content:space-between;align-items:baseline;margin-top:18px;padding:16px;border-radius:12px;background:var(--bg);font-weight:900}
+.bill b{font-size:28px;color:var(--accent)}
 .done{text-align:center;padding:26px 0 8px}
 .done svg{width:64px;height:64px;stroke:var(--accent);fill:none;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round}
 .done h4{font-size:20px;font-weight:900;margin-top:10px}
@@ -154,7 +158,7 @@ button:disabled{cursor:default}
   <div class="top-row">
     <div class="shop"><b id="shopName"></b><span id="tableChip" hidden></span></div>
     <button class="tool" data-act="history">
-      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg>履歴
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6.5 3.5h11v17l-2.75-1.6L12 20.5l-2.75-1.6L6.5 20.5zM9.5 8.5h5M9.5 12h5"/></svg>履歴・会計
     </button>
     <button class="tool" data-act="call">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 17a7 7 0 0 1 14 0M3.5 17h17M12 10V7.5M10 7.5h4"/></svg>呼出
@@ -186,7 +190,7 @@ button:disabled{cursor:default}
 
 <script>
 /* ===== 設定(config.js で上書き) ===== */
-const CFG = Object.assign({ GAS_URL:'', SHOP_NAME:'お店の名前', ALLOW_NOTE:false }, window.MO_CONFIG || {});
+const CFG = Object.assign({ GAS_URL:'', SHOP_NAME:'お店の名前', ALLOW_NOTE:false, PRICE_NOTE:'' }, window.MO_CONFIG || {});
 const DEMO = !CFG.GAS_URL;
 const TABLE = (new URLSearchParams(location.search).get('t') || (DEMO ? 'デモ' : '')).trim().slice(0, 20);
 
@@ -232,7 +236,7 @@ const api = DEMO ? {
   async order(b){
     const all = store.get('mo_demo_orders', []), at = Date.now();
     b.items.forEach(it => { const m = DEMO_MENU.find(x => x.id === it.id);
-      if (m) all.push({ lineId:uid(), orderId:b.orderId, at, table:b.table, name:m.name, qty:it.qty, note:it.note || '', call:false }); });
+      if (m) all.push({ lineId:uid(), orderId:b.orderId, at, table:b.table, id:m.id, name:m.name, price:m.price, qty:it.qty, note:it.note || '', call:false }); });
     store.set('mo_demo_orders', all); return { ok:true };
   },
   async call(b){
@@ -240,11 +244,17 @@ const api = DEMO ? {
     if (!all.some(x => x.call && !x.served && x.table === b.table))
       all.push({ lineId:uid(), orderId:'', at:Date.now(), table:b.table, name:'スタッフ呼び出し', qty:1, note:'', call:true });
     store.set('mo_demo_orders', all); return { ok:true };
+  },
+  async bill(table){
+    const lines = store.get('mo_demo_orders', []).filter(x => x.table === table && !x.call && !x.paid)
+      .map(x => ({ orderId:x.orderId, at:x.at, name:x.name, price:x.price || 0, qty:x.qty, served:!!x.served }));
+    return { ok:true, lines, total:lines.reduce((a, l) => a + l.price * l.qty, 0) };
   }
 } : {
   async menu(){ return (await fetch(CFG.GAS_URL + '?action=menu&_=' + Date.now())).json(); },
   order: b => post({ action:'order', ...b }),
-  call: b => post({ action:'call', ...b })
+  call: b => post({ action:'call', ...b }),
+  async bill(table){ return (await fetch(CFG.GAS_URL + '?action=bill&table=' + encodeURIComponent(table) + '&_=' + Date.now())).json(); }
 };
 async function post(body){
   const r = await fetch(CFG.GAS_URL, { method:'POST', headers:{ 'Content-Type':'text/plain;charset=utf-8' }, body:JSON.stringify(body) });
@@ -252,7 +262,7 @@ async function post(body){
 }
 
 /* ===== 状態 ===== */
-const CART_KEY = 'mo_cart_' + TABLE, HIST_KEY = 'mo_hist_' + TABLE;
+const CART_KEY = 'mo_cart_' + TABLE;
 const S = { menu:[], sig:'', group:'all', cart:{}, draft:null, pendingId:null, sending:false, view:null };
 (() => { const c = store.get(CART_KEY, null); if (c && Date.now() - c.at < 2 * 3600e3) S.cart = c.lines || {}; })();
 const byId = id => S.menu.find(m => m.id === id);
@@ -376,13 +386,10 @@ async function sendOrder(){
   S.sending = false;
   if (failed) { S.pendingId = orderId; return openCart(failed); }
   if (res.ok) {
-    const hist = store.get(HIST_KEY, []);
-    hist.push({ at:Date.now(), lines:lines.map(l => ({ name:byId(l.id).name, price:byId(l.id).price, qty:l.qty })) });
-    store.set(HIST_KEY, hist.slice(-40));
     S.cart = {}; saveCart(); S.view = 'done';
     return sheet('', `<div class="done"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9.5"/><path d="M7.5 12.5l3 3 6-6.5"/></svg>
       <h4>注文を送信しました</h4><p>ご用意ができ次第お持ちします。</p></div>`,
-      `<button class="primary" data-act="close">メニューに戻る</button>`);
+      `<button class="primary" data-act="close">メニューに戻る</button><button class="ghost" data-act="history">注文履歴とお会計金額を見る</button>`);
   }
   if (res.unavailable && res.unavailable.length) {
     const names = res.unavailable.map(id => byId(id)?.name).filter(Boolean).join('、');
@@ -392,14 +399,27 @@ async function sendOrder(){
   openCart(res.error || '注文を受け付けられませんでした。スタッフにお声がけください。');
 }
 
-function openHistory(){
-  const hist = store.get(HIST_KEY, []).filter(h => Date.now() - h.at < 8 * 3600e3);
-  let sum = 0;
-  const body = hist.length ? hist.slice().reverse().map(h => `<p class="when">${new Date(h.at).toLocaleTimeString('ja-JP', { hour:'2-digit', minute:'2-digit' })} のご注文</p>`
-      + h.lines.map(l => { sum += l.price * l.qty; return `<div class="row"><div class="t"><b>${esc(l.name)}</b><small>${yen(l.price)} × ${l.qty}</small></div><span>${yen(l.price * l.qty)}</span></div>`; }).join('')).join('')
-      + `<div class="total"><span>合計</span><span>${yen(sum)}</span></div><p class="hint">この端末から注文した分のみ表示しています。お会計はレジでお願いします。</p>`
-    : '<p class="state">まだ注文がありません。メニューから商品を選んでください。</p>';
-  S.view = 'history'; sheet('注文履歴', body);
+async function openHistory(){
+  const title = 'ご注文履歴とお会計';
+  S.view = 'history';
+  if (!TABLE) return sheet(title, '<p class="state">卓番号を読み取れていません。卓上のQRコードをもう一度読み取ってください。</p>');
+  sheet(title, '<p class="state">読み込んでいます…</p>');
+  let res;
+  try { res = await api.bill(TABLE); if (!res.ok) throw new Error(res.error); }
+  catch (e) {
+    if (S.view === 'history') sheet(title, '<p class="state">読み込めませんでした。電波の状況を確認してください。<button data-act="history">もう一度読み込む</button></p>');
+    return;
+  }
+  if (S.view !== 'history') return;   /* 読み込み中に閉じられた */
+  if (!res.lines.length) return sheet(title, '<p class="state">まだ注文がありません。メニューから商品を選んでください。</p>');
+  const orders = new Map();
+  res.lines.forEach(l => { const k = l.orderId || l.at; if (!orders.has(k)) orders.set(k, []); orders.get(k).push(l); });
+  const body = [...orders.values()].map(ls =>
+      `<p class="when">${new Date(ls[0].at).toLocaleTimeString('ja-JP', { hour:'2-digit', minute:'2-digit' })} のご注文</p>`
+      + ls.map(l => `<div class="row"><div class="t"><b>${esc(l.name)}${l.served ? '' : '<span class="wait">準備中</span>'}</b><small>${yen(l.price)} × ${l.qty}</small></div><span class="amt">${yen(l.price * l.qty)}</span></div>`).join('')).join('')
+    + `<div class="bill"><span>お会計金額${CFG.PRICE_NOTE ? '(' + esc(CFG.PRICE_NOTE) + ')' : ''}</span><b>${yen(res.total)}</b></div>
+       <p class="hint">この卓のご注文をまとめて表示しています。お会計はレジで、卓番号「${esc(TABLE)}」をお伝えください。</p>`;
+  sheet(title, body);
 }
 function openCall(){
   S.view = 'call';
