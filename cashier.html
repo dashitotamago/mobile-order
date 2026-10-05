@@ -1,0 +1,257 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#262422">
+<meta name="robots" content="noindex">
+<title>お会計</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@500;700;900&display=swap" rel="stylesheet">
+<script src="config.js"></script>
+<style>
+:root{
+  --bg:#1d1c1a; --bar:#262422; --panel:#322f2c; --head:#3d3a35; --chip:#45413c; --line:#57524b; --field:#211f1d;
+  --text:#f6f2e9; --mute:#a59f93; --accent:#f6b400; --accent-ink:#221b00; --alert:#ff7a5c;
+  color-scheme:dark;
+}
+*{box-sizing:border-box;margin:0}
+body{font-family:"Zen Kaku Gothic New","Hiragino Sans","Noto Sans JP","Yu Gothic UI",sans-serif;font-weight:500;
+  background:var(--bg);color:var(--text);line-height:1.45;min-height:100dvh;-webkit-tap-highlight-color:transparent;
+  padding-bottom:calc(90px + env(safe-area-inset-bottom))}
+button{font:inherit;color:inherit;background:none;border:0;padding:0;cursor:pointer}
+button:disabled{opacity:.45;cursor:default}
+input{font:inherit;font-size:16px;color:var(--text);background:var(--field);border:1px solid var(--line);border-radius:8px;padding:10px}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+[hidden]{display:none!important}
+
+.bar{position:sticky;top:0;z-index:10;display:flex;align-items:center;flex-wrap:wrap;gap:6px 18px;
+  padding:calc(10px + env(safe-area-inset-top)) 18px 10px;background:var(--bar);box-shadow:0 1px 0 #0008}
+.bar h1{font-size:18px;font-weight:900}
+.count{font-size:15px;color:var(--mute)}
+.count b{font-size:21px;font-weight:900;color:var(--accent);margin:0 3px}
+.stat{margin-left:auto;display:flex;align-items:center;gap:8px;font-size:13px;color:var(--mute)}
+.stat::before{content:"";width:10px;height:10px;border-radius:50%;background:#58c27d}
+.stat.off{color:var(--alert);font-weight:700}
+.stat.off::before{background:var(--alert)}
+
+.lay{display:grid;grid-template-columns:minmax(0,1fr);gap:14px;padding:14px;align-items:start}
+.tables{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:12px;align-content:start}
+.tcard{display:block;width:100%;text-align:left;padding:14px 16px;border-radius:12px;background:var(--panel);border:2px solid transparent}
+.tcard[aria-pressed=true]{border-color:var(--accent)}
+.tcard .no{display:flex;align-items:baseline;gap:6px}
+.tcard .no small{font-size:13px;color:var(--mute)}
+.tcard .no b{font-size:28px;font-weight:900;line-height:1.1}
+.tcard .sum{display:block;margin-top:6px;font-size:24px;font-weight:900;color:var(--accent)}
+.tcard .meta{display:block;margin-top:2px;font-size:13px;color:var(--mute)}
+.empty{grid-column:1/-1;padding:16vh 20px;text-align:center;color:var(--mute);font-size:16px}
+.empty b{display:block;font-size:22px;font-weight:900;color:var(--text);margin-bottom:8px}
+
+.detail{background:var(--panel);border-radius:14px;overflow:hidden}
+.detail>header{display:flex;align-items:center;gap:10px;padding:14px 10px 14px 18px;background:var(--head)}
+.detail>header small{font-size:13px;color:var(--mute)}
+.detail>header b{font-size:30px;font-weight:900;line-height:1.1}
+.detail>header span{font-size:13px;color:var(--mute);margin-left:6px}
+.x{margin-left:auto;width:46px;height:46px;display:grid;place-items:center;font-size:22px;color:var(--mute)}
+.lines{padding:4px 18px}
+.row{display:flex;align-items:baseline;gap:10px;padding:11px 0;border-bottom:1px solid #ffffff14}
+.row .nm{flex:1;min-width:0;font-size:17px;font-weight:700}
+.row .q{min-width:44px;text-align:right;color:var(--mute);white-space:nowrap}
+.row .q.many{color:var(--text);font-weight:900}
+.row .amt{min-width:84px;text-align:right;white-space:nowrap}
+.row small{display:block;font-size:12.5px;font-weight:500;color:var(--mute)}
+.total{display:flex;justify-content:space-between;align-items:baseline;padding:18px;font-weight:900;font-size:17px}
+.total b{font-size:38px;color:var(--accent);line-height:1}
+.warn{margin:0 18px 14px;padding:10px 12px;border-radius:8px;background:#4f2a21;color:#ffd9cf;font-size:14px;font-weight:700}
+.pay{display:block;width:calc(100% - 36px);margin:0 18px 18px;min-height:60px;border-radius:12px;background:var(--accent);color:var(--accent-ink);font-weight:900;font-size:19px}
+.hint{padding:0 18px 18px;font-size:12.5px;color:var(--mute)}
+
+@media (min-width:820px){
+  .lay.open{grid-template-columns:minmax(0,1fr) 400px}
+  .detail{position:sticky;top:76px;max-height:calc(100dvh - 96px);overflow-y:auto}
+}
+@media (max-width:819.98px){
+  .detail{position:fixed;inset:0;z-index:20;border-radius:0;overflow-y:auto;padding-top:env(safe-area-inset-top);padding-bottom:env(safe-area-inset-bottom)}
+}
+
+.gate{position:fixed;inset:0;z-index:30;display:grid;place-content:center;gap:12px;padding:24px;background:var(--bg)}
+.gate h2{font-size:22px;font-weight:900}
+.gate p{font-size:14px;color:var(--mute);max-width:24em}
+.gate input{width:min(320px,80vw)}
+.gate .err{color:var(--alert);font-weight:700}
+.primary{min-height:50px;padding:0 26px;border-radius:10px;background:var(--accent);color:var(--accent-ink);font-weight:900;justify-self:start}
+.snack{position:fixed;left:50%;bottom:calc(18px + env(safe-area-inset-bottom));z-index:40;transform:translate(-50%,200%);
+  display:flex;align-items:center;gap:14px;max-width:92vw;padding:12px 12px 12px 20px;border-radius:14px;
+  background:#f6f2e9;color:#231f1a;font-weight:700;font-size:15px;box-shadow:0 8px 24px #000a;transition:transform .2s}
+.snack.on{transform:translate(-50%,0)}
+.snack button{flex:none;min-height:46px;padding:0 18px;border-radius:10px;background:#231f1a;color:#f6f2e9;font-weight:900}
+@media (prefers-reduced-motion:reduce){.snack{transition:none}}
+</style>
+</head>
+<body>
+
+<header class="bar">
+  <h1 id="shopName"></h1>
+  <p class="count">未会計<b id="nTables">0</b>卓 / 合計<b id="nSum">¥0</b></p>
+  <p class="stat" id="stat">接続中…</p>
+</header>
+
+<div class="lay" id="lay">
+  <main class="tables" id="tables"></main>
+  <aside class="detail" id="detail" hidden></aside>
+</div>
+
+<div class="gate" id="gate" hidden>
+  <h2>お会計</h2>
+  <p>管理用パスワードを入力してください。この端末では次回から入力不要になります。</p>
+  <input type="password" id="pw" autocomplete="current-password" aria-label="パスワード">
+  <p class="err" id="gateErr" hidden></p>
+  <button class="primary" id="gateGo">ログイン</button>
+</div>
+
+<div class="snack" id="snack" role="status"><span id="snackText"></span><button id="snackBtn" hidden>取り消す</button></div>
+
+<script>
+/* ===== 設定(config.js で上書き) ===== */
+const CFG = Object.assign({ GAS_URL:'', SHOP_NAME:'お店の名前', PRICE_NOTE:'', CASHIER_POLL_MS:10000 }, window.MO_CONFIG || {});
+const DEMO = !CFG.GAS_URL;
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
+const yen = n => '¥' + Number(n || 0).toLocaleString('ja-JP');
+const hm = t => new Date(t).toLocaleTimeString('ja-JP', { hour:'2-digit', minute:'2-digit' });
+const mem = {};
+const store = {
+  get(k, d){ try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch (e) { return k in mem ? mem[k] : d; } },
+  set(k, v){ mem[k] = v; try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
+};
+
+const S = { pass:store.get('mo_staff_pass', ''), tables:[], sel:null, sig:null, paying:false, last:null };
+
+/* ===== 通信(GAS未設定のときはデモ) ===== */
+if (DEMO && !store.get('mo_demo_cash_seeded', false)) {
+  const t = Date.now(), L = (table, id, name, price, qty, min, served) => ({ lineId:'c' + Math.random().toString(36).slice(2, 9), orderId:table + '-' + min, at:t - min * 60000, table, id, name, price, qty, note:'', call:false, served });
+  store.set('mo_demo_orders', [...store.get('mo_demo_orders', []),
+    L('2', 'd01', '生ビール', 620, 2, 48, true), L('2', 'f01', '出汁巻き玉子', 780, 1, 48, true), L('2', 'f07', '刺身三種盛り', 1280, 1, 30, true), L('2', 'd01', '生ビール', 620, 1, 12, false),
+    L('7', 'd04', 'ハイボール', 520, 3, 25, true), L('7', 'f02', '鶏の唐揚げ', 680, 2, 25, true)]);
+  store.set('mo_demo_cash_seeded', true);
+}
+async function call(action, extra = {}){
+  if (DEMO) {
+    const all = store.get('mo_demo_orders', []), open = all.filter(x => !x.call && !x.paid);
+    if (action === 'tables') {
+      const by = new Map();
+      open.forEach(x => { if (!by.has(x.table)) by.set(x.table, []); by.get(x.table).push({ id:x.id || x.name, orderId:x.orderId, at:x.at, name:x.name, price:x.price || 0, qty:x.qty, served:!!x.served }); });
+      return { ok:true, tables:[...by].map(([table, lines]) => ({ table, lines, total:lines.reduce((a, l) => a + l.price * l.qty, 0) })) };
+    }
+    const stamp = action === 'pay' ? Date.now() : extra.stamp;
+    all.forEach(x => { if (x.table !== extra.table || x.call) return; if (action === 'pay' && !x.paid) x.paid = stamp; else if (action === 'unpay' && x.paid === stamp) delete x.paid; });
+    store.set('mo_demo_orders', all); return { ok:true, stamp };
+  }
+  const r = await fetch(CFG.GAS_URL, { method:'POST', headers:{ 'Content-Type':'text/plain;charset=utf-8' }, body:JSON.stringify({ action, pass:S.pass, ...extra }) });
+  const res = await r.json();
+  if (res.error === 'unknown action') res.error = 'GAS側が古いままです。新しい Code.gs に差し替えて、新バージョンとして再デプロイしてください。';
+  return res;
+}
+
+/* ===== 読み込み ===== */
+let timer = null;
+async function poll(){
+  clearTimeout(timer);
+  try {
+    const res = await call('tables');
+    if (!res.ok) {
+      if (res.auth) return openGate(S.pass ? res.error : '');
+      throw new Error(res.error);
+    }
+    $('#gate').hidden = true;
+    S.tables = res.tables.sort((a, b) => a.table.localeCompare(b.table, 'ja', { numeric:true }));
+    render();
+    $('#stat').className = 'stat'; $('#stat').textContent = (DEMO ? 'デモ表示中 ' : '') + '更新 ' + new Date().toLocaleTimeString('ja-JP');
+  } catch (e) {
+    $('#stat').className = 'stat off';
+    $('#stat').textContent = e && e.message && e.message.startsWith('GAS') ? e.message : '通信できません。Wi-Fiを確認してください';
+  }
+  timer = setTimeout(poll, document.hidden ? 30000 : CFG.CASHIER_POLL_MS);
+}
+document.addEventListener('visibilitychange', () => { if (!document.hidden && $('#gate').hidden) poll(); });
+
+/* ===== 描画 ===== */
+const count = t => t.lines.reduce((a, l) => a + l.qty, 0);
+function render(){
+  const sig = JSON.stringify([S.tables, S.sel, S.paying]);
+  if (sig === S.sig) return;      /* 変化がなければ描き直さない(押している最中のボタンを消さないため) */
+  S.sig = sig;
+  if (S.sel != null && !S.tables.some(t => t.table === S.sel)) S.sel = null;
+  $('#nTables').textContent = S.tables.length;
+  $('#nSum').textContent = yen(S.tables.reduce((a, t) => a + t.total, 0));
+  $('#tables').innerHTML = S.tables.length ? S.tables.map(t => `<button class="tcard" data-table="${esc(t.table)}" aria-pressed="${t.table === S.sel}">
+      <span class="no"><small>卓</small><b>${esc(t.table)}</b></span>
+      <span class="sum">${yen(t.total)}</span>
+      <span class="meta">${count(t)}品 / ${hm(Math.min(...t.lines.map(l => l.at)))}〜</span>
+    </button>`).join('')
+    : '<div class="empty"><b>未会計の卓はありません</b>注文が入ると、ここに卓ごとの金額が表示されます。</div>';
+
+  const t = S.tables.find(x => x.table === S.sel), d = $('#detail');
+  $('#lay').classList.toggle('open', !!t); d.hidden = !t;
+  if (!t) return;
+  /* 同じ商品・同じ単価はまとめて表示 */
+  const agg = new Map();
+  t.lines.forEach(l => { const k = l.id + '|' + l.price + '|' + l.name, a = agg.get(k) || { name:l.name, price:l.price, qty:0 }; a.qty += l.qty; agg.set(k, a); });
+  const waiting = t.lines.filter(l => !l.served).reduce((a, l) => a + l.qty, 0);
+  d.innerHTML = `<header><small>卓</small><b>${esc(t.table)}</b><span>${hm(Math.min(...t.lines.map(l => l.at)))}〜 / ${count(t)}品</span>
+      <button class="x" data-close aria-label="閉じる">✕</button></header>
+    <div class="lines">${[...agg.values()].map(a => `<div class="row"><span class="nm">${esc(a.name)}<small>${yen(a.price)}</small></span>
+      <span class="q${a.qty > 1 ? ' many' : ''}">×${a.qty}</span><span class="amt">${yen(a.price * a.qty)}</span></div>`).join('')}</div>
+    <div class="total"><span>お会計金額${CFG.PRICE_NOTE ? '(' + esc(CFG.PRICE_NOTE) + ')' : ''}</span><b>${yen(t.total)}</b></div>
+    ${waiting ? `<p class="warn">まだ提供していない商品が${waiting}品あります。</p>` : ''}
+    <button class="pay" data-pay${S.paying ? ' disabled' : ''}>${S.paying ? '処理中…' : '会計済にする'}</button>
+    <p class="hint">会計済にすると、この卓の注文履歴と金額が0に戻ります。次のお客様のために、お会計のたびに押してください。</p>`;
+}
+$('#tables').addEventListener('click', e => {
+  const b = e.target.closest('[data-table]'); if (!b) return;
+  S.sel = S.sel === b.dataset.table ? null : b.dataset.table; render();
+});
+$('#detail').addEventListener('click', e => {
+  if (e.target.closest('[data-close]')) { S.sel = null; render(); }
+  else if (e.target.closest('[data-pay]')) pay();
+});
+
+/* ===== 会計済 / 取り消し ===== */
+async function pay(){
+  const t = S.tables.find(x => x.table === S.sel); if (!t || S.paying) return;
+  S.paying = true; render();
+  try {
+    const res = await call('pay', { table:t.table, total:t.total });
+    S.paying = false;
+    if (!res.ok) { if (res.auth) return openGate(res.error); await poll(); render(); return snack(res.error || '会計済にできませんでした。'); }
+    S.last = { table:t.table, stamp:res.stamp };
+    S.tables = S.tables.filter(x => x.table !== t.table); S.sel = null; render();
+    snack(`卓${t.table} を会計済にしました(${yen(t.total)})`, true);
+  } catch (e) { S.paying = false; render(); snack('会計済にできませんでした。通信状況を確認して、もう一度押してください。'); }
+}
+$('#snackBtn').addEventListener('click', async () => {
+  const last = S.last; S.last = null; $('#snack').classList.remove('on'); if (!last) return;
+  try { const res = await call('unpay', last); if (!res.ok) throw new Error(res.error); S.sel = last.table; await poll(); }
+  catch (e) { snack('取り消せませんでした。通信状況を確認してください。'); }
+});
+function snack(text, undo){
+  $('#snackText').textContent = text; $('#snackBtn').hidden = !undo; $('#snack').classList.add('on');
+  clearTimeout(snack.t); snack.t = setTimeout(() => { $('#snack').classList.remove('on'); if (undo) S.last = null; }, undo ? 10000 : 4500);
+}
+
+/* ===== ログイン ===== */
+function openGate(err){
+  clearTimeout(timer);
+  $('#gateErr').hidden = !err; $('#gateErr').textContent = err || '';
+  $('#pw').value = ''; $('#gate').hidden = false; $('#pw').focus();
+}
+function gateGo(){ const v = $('#pw').value; if (!v) return; S.pass = v; store.set('mo_staff_pass', v); $('#gateErr').hidden = true; poll(); }
+$('#gateGo').addEventListener('click', gateGo);
+$('#pw').addEventListener('keydown', e => { if (e.key === 'Enter') gateGo(); });
+
+$('#shopName').textContent = CFG.SHOP_NAME + ' お会計'; document.title = CFG.SHOP_NAME + ' | お会計';
+if (DEMO || S.pass) poll(); else openGate('');
+</script>
+</body>
+</html>
