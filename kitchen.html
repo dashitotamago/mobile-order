@@ -69,6 +69,9 @@ button{font:inherit;color:inherit;background:none;border:0;padding:0;cursor:poin
   background:#1d1c1af2;text-align:center}
 .gate h2{font-size:24px;font-weight:900}
 .gate p{color:var(--mute);font-size:15px;max-width:26em}
+.login{display:grid;gap:10px;width:min(340px,86vw);margin-top:6px}
+.login input{font:inherit;font-size:16px;color:var(--text);background:#211f1d;border:1px solid #57524b;border-radius:10px;padding:13px}
+.lgerr{color:var(--alert);font-weight:700;font-size:14px}
 .gate button{margin-top:8px;padding:18px 44px;border-radius:14px;background:var(--accent);color:var(--accent-ink);font-weight:900;font-size:19px}
 @media (prefers-reduced-motion:reduce){.line.new{animation:none}.snack{transition:none}}
 </style>
@@ -88,13 +91,20 @@ button{font:inherit;color:inherit;background:none;border:0;padding:0;cursor:poin
 <div class="gate" id="gate">
   <h2>注文の受付を始めます</h2>
   <p>ボタンを押すと、新しい注文が入ったときに通知音が鳴るようになります。タブレットの音量を上げておいてください。</p>
+  <div class="login" id="login" hidden>
+    <input type="email" id="lgEmail" autocomplete="username" placeholder="スタッフ用メールアドレス" aria-label="メールアドレス">
+    <input type="password" id="lgPass" autocomplete="current-password" placeholder="パスワード" aria-label="パスワード">
+    <p class="lgerr" id="lgErr" hidden></p>
+  </div>
   <button id="start">受付を始める</button>
 </div>
 
 <script>
 /* ===== 設定(config.js で上書き) ===== */
-const CFG = Object.assign({ GAS_URL:'', SHOP_NAME:'お店の名前', POLL_MS:5000, WARN_MIN:10, LATE_MIN:20 }, window.MO_CONFIG || {});
-const DEMO = !CFG.GAS_URL;
+const CFG = Object.assign({ GAS_URL:'', FIREBASE:null, SHOP_NAME:'お店の名前', POLL_MS:5000, WARN_MIN:10, LATE_MIN:20 }, window.MO_CONFIG || {});
+const MODE = CFG.FIREBASE && CFG.FIREBASE.projectId ? 'fb' : CFG.GAS_URL ? 'gas' : 'demo';
+const DEMO = MODE === 'demo';
+const FBP = MODE === 'fb' ? import('./fb.js') : null;
 
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
@@ -118,6 +128,8 @@ const api = DEMO ? {
     const all = store.get('mo_demo_orders', []), x = all.find(i => i.lineId === lineId);
     if (x) x.served = served; store.set('mo_demo_orders', all); return { ok:true };
   }
+} : MODE === 'fb' ? {
+  serve: async (lineId, served) => (await FBP).setServed(lineId, served)
 } : {
   async orders(){ return (await fetch(CFG.GAS_URL + '?action=orders&_=' + Date.now())).json(); },
   async serve(lineId, served){
@@ -131,22 +143,24 @@ let items = [], known = null, sig = null, offset = 0, last = null;
 const hide = new Map();      /* 提供済にした直後の行(通信の行き違いで再表示されないように) */
 const fresh = new Set();     /* 届いたばかりの行(点滅させる) */
 
+function apply(all){
+  const now = Date.now(); hide.forEach((v, k) => { if (v < now) hide.delete(k); });
+  const list = all.filter(i => !hide.has(i.lineId));
+  if (known) {
+    const nw = list.filter(i => !known.has(i.lineId));
+    if (nw.length) { nw.forEach(i => { fresh.add(i.lineId); setTimeout(() => fresh.delete(i.lineId), 5000); }); beep(nw.some(i => i.call)); }
+  }
+  known = new Set(list.map(i => i.lineId)); items = list; render();
+}
+const statOk = t => { $('#stat').className = 'stat'; $('#stat').textContent = t; };
+const statNg = t => { $('#stat').className = 'stat off'; $('#stat').textContent = t || '通信できません。Wi-Fiを確認してください'; };
 async function poll(){
   try {
     const res = await api.orders(); if (!res.ok) throw new Error(res.error);
     offset = (res.now || Date.now()) - Date.now();
-    const now = Date.now(); hide.forEach((v, k) => { if (v < now) hide.delete(k); });
-    const list = res.items.filter(i => !hide.has(i.lineId));
-    if (known) {
-      const nw = list.filter(i => !known.has(i.lineId));
-      if (nw.length) { nw.forEach(i => { fresh.add(i.lineId); setTimeout(() => fresh.delete(i.lineId), 5000); }); beep(nw.some(i => i.call)); }
-    }
-    known = new Set(list.map(i => i.lineId)); items = list; render();
-    $('#stat').className = 'stat';
-    $('#stat').textContent = (DEMO ? 'デモ表示中 ' : '') + '更新 ' + new Date().toLocaleTimeString('ja-JP');
-  } catch (e) {
-    $('#stat').className = 'stat off'; $('#stat').textContent = '通信できません。Wi-Fiを確認してください';
-  }
+    apply(res.items);
+    statOk((DEMO ? 'デモ表示中 ' : '') + '更新 ' + new Date().toLocaleTimeString('ja-JP'));
+  } catch (e) { statNg(); }
 }
 function loop(){ poll().finally(() => setTimeout(loop, document.hidden ? 15000 : CFG.POLL_MS)); }
 
@@ -218,14 +232,31 @@ function beep(isCall){
   });
 }
 async function keepAwake(){ try { if ('wakeLock' in navigator) await navigator.wakeLock.request('screen'); } catch (e) {} }
-$('#start').addEventListener('click', () => {
+let staff = MODE !== 'fb';
+$('#start').addEventListener('click', async () => {
+  if (!staff) {   /* Firebase版はスタッフ用アカウントでログイン(この端末では次回から不要) */
+    const fb = await FBP, r = await fb.login($('#lgEmail').value, $('#lgPass').value);
+    if (!r.ok) { $('#lgErr').hidden = false; $('#lgErr').textContent = r.code === 'login' ? 'メールアドレスかパスワードが違います。' : r.code === 'many' ? '何度も間違えたため一時的にログインできません。少し待ってから試してください。' : 'ログインできませんでした。通信状況を確認してください。'; return; }
+  }
   try { ac = new (window.AudioContext || window.webkitAudioContext)(); ac.resume(); beep(false); } catch (e) {}
   keepAwake(); $('#gate').hidden = true;
 });
 document.addEventListener('visibilitychange', () => { if (!document.hidden) { keepAwake(); if (ac) ac.resume(); } });
 
 $('#shopName').textContent = CFG.SHOP_NAME + ' 注文確認';
-loop();
+if (MODE === 'fb') {
+  /* Firebase版:注文が入った瞬間に表示される(数秒ごとの確認は不要) */
+  let off = null;
+  FBP.then(fb => {
+    fb.watchStaff(u => {
+      staff = !!u; $('#login').hidden = staff;
+      $('#start').textContent = staff ? '受付を始める' : 'ログインして受付を始める';
+      if (u && !off) off = fb.watchPending((list, cached) => { apply(list); cached ? statNg('通信できません。Wi-Fiを確認してください(最後に届いた内容を表示中)') : statOk('リアルタイム受信中'); },
+        code => statNg(code === 'permission' ? 'このアカウントでは表示できません。設定を確認してください' : ''));
+      if (!u && off) { off(); off = null; $('#gate').hidden = false; }
+    });
+  }).catch(() => statNg('読み込めませんでした。ページを開き直してください'));
+} else loop();
 </script>
 </body>
 </html>
