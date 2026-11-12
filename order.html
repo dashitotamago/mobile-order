@@ -199,8 +199,11 @@ button:disabled{cursor:default}
 
 <script>
 /* ===== 設定(config.js で上書き) ===== */
-const CFG = Object.assign({ GAS_URL:'', SHOP_NAME:'お店の名前', ALLOW_NOTE:false, TAX_RATE:0.10, TAX_ROUND:'floor', TAX_NOTE:'( )内は税込価格です' }, window.MO_CONFIG || {});
-const DEMO = !CFG.GAS_URL;
+const CFG = Object.assign({ GAS_URL:'', FIREBASE:null, SHOP_NAME:'お店の名前', ALLOW_NOTE:false, TAX_RATE:0.10, TAX_ROUND:'floor', TAX_NOTE:'( )内は税込価格です' }, window.MO_CONFIG || {});
+/* 保存先: Firebaseが設定されていればFirebase、なければGAS、どちらもなければデモ */
+const MODE = CFG.FIREBASE && CFG.FIREBASE.projectId ? 'fb' : CFG.GAS_URL ? 'gas' : 'demo';
+const DEMO = MODE === 'demo';
+const FBP = MODE === 'fb' ? import('./fb.js') : null;
 const TABLE = (new URLSearchParams(location.search).get('t') || (DEMO ? 'デモ' : '')).trim().slice(0, 20);
 
 /* ===== デモ用メニュー(GAS未設定のときだけ使う) ===== */
@@ -274,6 +277,10 @@ const api = DEMO ? {
       .map(x => ({ orderId:x.orderId, at:x.at, name:x.name, price:x.price || 0, qty:x.qty, served:!!x.served }));
     return { ok:true, lines, total:lines.reduce((a, l) => a + l.price * l.qty, 0) };
   }
+} : MODE === 'fb' ? {
+  order: async b => (await FBP).placeOrder({ ...b, menu:S.menu }),
+  call: async b => (await FBP).callStaff(b.table),
+  bill: async t => (await FBP).bill(t)
 } : {
   async menu(){ return (await fetch(CFG.GAS_URL + '?action=menu&_=' + Date.now())).json(); },
   order: b => post({ action:'order', ...b }),
@@ -417,7 +424,7 @@ async function sendOrder(){
   }
   if (res.unavailable && res.unavailable.length) {
     const names = res.unavailable.map(id => byId(id)?.name).filter(Boolean).join('、');
-    res.unavailable.forEach(id => delete S.cart[id]); saveCart(); loadMenu();
+    res.unavailable.forEach(id => delete S.cart[id]); saveCart(); if (MODE !== 'fb') loadMenu();
     return openCart(`${names || '一部の商品'} は売り切れのためカートから外しました。内容をご確認ください。`);
   }
   openCart(res.error || '注文を受け付けられませんでした。スタッフにお声がけください。');
@@ -507,25 +514,35 @@ $('#recTrack').addEventListener('scroll', e => {
 new ResizeObserver(() => document.documentElement.style.setProperty('--top-h', topH() + 'px')).observe($('#top'));
 
 /* ===== 起動 ===== */
-async function loadMenu(showLoading){
-  if (showLoading) $('#list').innerHTML = '<p class="state">メニューを読み込んでいます…</p>';
-  try {
-    const res = await api.menu(); if (!res.ok) throw new Error(res.error);
-    const menu = res.menu.map(m => ({ ...m, id:String(m.id), cat:m.cat || 'その他' })), sig = JSON.stringify(menu);
-    if (sig === S.sig) return;
-    S.sig = sig; S.menu = menu;
-    if (S.view === 'item' || S.view === 'cart') { S.dirty = true; renderCartbar(); return; }   /* 操作中は画面を差し替えない */
-    renderAll(); spy();
-  } catch (e) {
-    if (!S.menu.length) $('#list').innerHTML = '<p class="state">メニューを読み込めませんでした。電波の状況を確認してください。<button data-act="reload">もう一度読み込む</button></p>';
-  }
+const MENU_CACHE = 'mo_menu_cache';
+function applyMenu(list){
+  const menu = list.filter(m => !m.hidden).map(m => ({ ...m, id:String(m.id), cat:m.cat || 'その他' })), sig = JSON.stringify(menu);
+  if (sig === S.sig) return;
+  S.sig = sig; S.menu = menu; store.set(MENU_CACHE, menu);
+  if (S.view === 'item' || S.view === 'cart') { S.dirty = true; renderCartbar(); return; }   /* 操作中は画面を差し替えない */
+  renderAll(); spy();
 }
+const menuFail = () => { if (!S.menu.length) $('#list').innerHTML = '<p class="state">メニューを読み込めませんでした。電波の状況を確認してください。<button data-act="reload">もう一度読み込む</button></p>'; };
+async function loadMenu(showLoading){
+  if (MODE === 'fb') { if (showLoading) location.reload(); return; }   /* Firebase版は自動で最新になる */
+  if (showLoading) $('#list').innerHTML = '<p class="state">メニューを読み込んでいます…</p>';
+  try { const res = await api.menu(); if (!res.ok) throw new Error(res.error); applyMenu(res.menu); }
+  catch (e) { menuFail(); }
+}
+/* 前回のメニューを先に出して、すぐ操作できるようにする(最新は届きしだい差し替え) */
+(() => { const c = store.get(MENU_CACHE, null); if (!DEMO && Array.isArray(c) && c.length) applyMenu(c); })();
 $('#shopName').textContent = CFG.SHOP_NAME; document.title = CFG.SHOP_NAME + ' | ご注文';
 if (TABLE) { $('#tableChip').hidden = false; $('#tableChip').textContent = '卓 ' + TABLE; }
 $('#noTable').hidden = !!TABLE; $('#demoNote').hidden = !DEMO;
-loadMenu();
-setInterval(() => { if (!document.hidden) loadMenu(); }, 60000);   /* 売り切れの反映 */
-document.addEventListener('visibilitychange', () => { if (!document.hidden) loadMenu(); });
+if (MODE === 'fb') {
+  /* Firebase版:メニュー・売り切れの変更が即座に届く */
+  FBP.then(fb => { fb.watchMenu(list => { if (list.length) applyMenu(list); else if (!S.menu.length) $('#list').innerHTML = '<p class="state">メニューの準備中です。スタッフにお声がけください。</p>'; }, menuFail); fb.anon().catch(() => {}); })
+     .catch(menuFail);
+} else {
+  loadMenu();
+  setInterval(() => { if (!document.hidden) loadMenu(); }, 60000);   /* 売り切れの反映 */
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) loadMenu(); });
+}
 </script>
 </body>
 </html>
