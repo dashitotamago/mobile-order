@@ -102,6 +102,7 @@ main{max-width:920px;margin:0 auto;padding:6px 12px}
 </header>
 <p class="note" id="passNote" hidden>パスワードが初期設定(0000)のままです。上の「パスワード変更」から変更してください。</p>
 <p class="note soft" id="demoNote" hidden>デモ表示中です。保存してもお店のメニューは変わりません。</p>
+<p class="note soft" id="importNote" hidden>Firebaseにはまだメニューがありません。<button class="lnk" id="importBtn">スプレッドシートのメニューを取り込む</button>(取り込んだあと「保存する」を押すと反映されます)</p>
 
 <main id="cats"><p class="state">メニューを読み込んでいます…</p></main>
 <button class="addcat" id="addCat" hidden>＋ カテゴリを追加</button>
@@ -112,6 +113,7 @@ main{max-width:920px;margin:0 auto;padding:6px 12px}
 <div class="gate" id="gate" hidden>
   <h2 id="gateTitle">メニュー管理</h2>
   <p id="gateText">管理用パスワードを入力してください。</p>
+  <input type="email" id="em1" autocomplete="username" placeholder="スタッフ用メールアドレス" aria-label="メールアドレス" hidden>
   <input type="password" id="pw1" autocomplete="current-password" aria-label="パスワード">
   <input type="password" id="pw2" autocomplete="new-password" aria-label="新しいパスワード(確認)" placeholder="もう一度入力" hidden>
   <p class="err" id="gateErr" hidden></p>
@@ -122,8 +124,10 @@ main{max-width:920px;margin:0 auto;padding:6px 12px}
 
 <script>
 /* ===== 設定(config.js で上書き) ===== */
-const CFG = Object.assign({ GAS_URL:'', SHOP_NAME:'お店の名前', TAX_RATE:0.10, TAX_ROUND:'floor' }, window.MO_CONFIG || {});
-const DEMO = !CFG.GAS_URL;
+const CFG = Object.assign({ GAS_URL:'', FIREBASE:null, SHOP_NAME:'お店の名前', TAX_RATE:0.10, TAX_ROUND:'floor' }, window.MO_CONFIG || {});
+const MODE = CFG.FIREBASE && CFG.FIREBASE.projectId ? 'fb' : CFG.GAS_URL ? 'gas' : 'demo';
+const DEMO = MODE === 'demo';
+const FBP = MODE === 'fb' ? import('./fb.js') : null;
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
@@ -164,7 +168,34 @@ const DEMO_MENU = [
 const S = { pass:sess.get(), cats:[], dirty:false, saving:false, target:null, undo:null, gateMode:'login' };
 
 /* ===== 通信 ===== */
+async function gas(body){
+  const r = await fetch(CFG.GAS_URL, { method:'POST', headers:{ 'Content-Type':'text/plain;charset=utf-8' }, body:JSON.stringify(body) });
+  const res = await r.json();
+  if (res.error === 'unknown action') res.error = 'GAS側が古いままです。新しい Code.gs に差し替えて、新バージョンとして再デプロイしてください。';
+  return res;
+}
 async function call(action, extra){
+  if (MODE === 'fb') {   /* Firebase版:メニューはFirebase、写真の保存だけGASを使う */
+    const fb = await FBP;
+    try {
+      if (action === 'adminMenu') { const menu = await fb.getMenu(); return { ok:true, menu, importable:!menu.length && !!CFG.GAS_URL }; }
+      if (action === 'saveMenu') {
+        const seen = new Set();
+        const items = extra.items.map(it => { let id = String(it.id || '').replace(/[^\w-]/g, '').slice(0, 24); if (!id || seen.has(id)) id = 'm' + uid().replace(/[^\w]/g, ''); seen.add(id); return { ...it, id }; });
+        return await fb.saveMenu(items);
+      }
+      if (action === 'uploadImage' || action === 'importMenu') {
+        if (!CFG.GAS_URL) return { ok:false, error:'写真を保存するには config.js に GAS_URL が必要です。' };
+        const res = await gas({ action:action === 'importMenu' ? 'adminMenu' : action, idToken:await fb.idToken(), ...extra });
+        if (res.auth) res.error = 'GAS側でログインを確認できませんでした。Code.gs の FIREBASE_API_KEY と STAFF_EMAILS を設定して再デプロイしてください。';
+        delete res.auth; return res;
+      }
+    } catch (e) {
+      const c = fb.err(e);
+      return { ok:false, error:c === 'permission' ? 'このアカウントでは保存できません。firestore.rules の STAFF_EMAILS を確認してください。' : '通信できませんでした。通信状況を確認して、もう一度試してください。' };
+    }
+    return { ok:true };
+  }
   if (DEMO) {
     if (action === 'adminMenu') return { ok:true, menu:store.get('mo_demo_menu', DEMO_MENU) };
     if (action === 'saveMenu') { store.set('mo_demo_menu', extra.items); return { ok:true, count:extra.items.length }; }
@@ -364,7 +395,7 @@ $('#save').addEventListener('click', async () => {
     S.saving = false;
     if (!res.ok) { setDirty(); if (res.auth) return openGate('login'); return snack(res.error || '保存できませんでした。'); }
     setDirty(false); await load(true);
-    snack(`保存しました(${res.count}品)。注文画面には1分ほどで反映されます。`);
+    snack(`保存しました(${res.count}品)。${MODE === 'fb' ? '注文画面にすぐ反映されます。' : '注文画面には1分ほどで反映されます。'}`);
   } catch (err) { S.saving = false; setDirty(); snack('保存できませんでした。通信状況を確認して、もう一度押してください。'); }
 });
 addEventListener('beforeunload', e => { if (S.dirty) { e.preventDefault(); e.returnValue = ''; } });
@@ -374,20 +405,35 @@ async function load(quiet){
   try {
     const res = await call('adminMenu');
     if (!res.ok) { if (res.auth) return openGate('login', S.pass ? res.error : ''); throw new Error(res.error); }
-    const open = new Set(S.cats.flatMap(c => c.items.filter(i => i.open).map(i => i.id)));
-    const map = new Map();
-    res.menu.forEach(m => {
-      const key = (m.group || '') + '\u0001' + (m.cat || '');
-      if (!map.has(key)) map.set(key, { name:m.cat || '', group:m.group || '', items:[] });
-      map.get(key).items.push({ k:uid(), id:String(m.id), name:m.name || '', price:m.price ?? '', desc:m.desc || '', img:m.img || '', badge:m.badge || '',
-        rec:!!m.rec, sold:!!m.sold, hidden:!!m.hidden, open:open.has(String(m.id)) });
-    });
-    S.cats = [...map.values()]; $('#gate').hidden = true; $('#passNote').hidden = !res.defaultPass;
+    $('#importNote').hidden = !res.importable;
+    fill(res.menu); $('#gate').hidden = true; $('#passNote').hidden = !res.defaultPass;
     setDirty(false); render();
   } catch (err) {
     if (!quiet) $('#cats').innerHTML = `<p class="state">${esc(err && err.message ? err.message : 'メニューを読み込めませんでした。通信状況を確認して、ページを読み込み直してください。')}</p>`;
   }
 }
+function fill(menu){
+    const open = new Set(S.cats.flatMap(c => c.items.filter(i => i.open).map(i => i.id)));
+    const map = new Map();
+    menu.forEach(m => {
+      const key = (m.group || '') + '\u0001' + (m.cat || '');
+      if (!map.has(key)) map.set(key, { name:m.cat || '', group:m.group || '', items:[] });
+      map.get(key).items.push({ k:uid(), id:String(m.id), name:m.name || '', price:m.price ?? '', desc:m.desc || '', img:m.img || '', badge:m.badge || '',
+        rec:!!m.rec, sold:!!m.sold, hidden:!!m.hidden, open:open.has(String(m.id)) });
+    });
+    S.cats = [...map.values()];
+}
+$('#importBtn').addEventListener('click', async () => {   /* GAS版のスプレッドシートからメニューを取り込む */
+  $('#importBtn').disabled = true;
+  try {
+    const res = await call('importMenu');
+    if (!res.ok) throw new Error(res.error);
+    if (!res.menu.length) throw new Error('スプレッドシートにメニューがありませんでした。');
+    fill(res.menu); render(); setDirty(); $('#importNote').hidden = true;
+    snack(`${res.menu.length}品を取り込みました。内容を確認して「保存する」を押してください。`);
+  } catch (err) { snack(err && err.message ? err.message : '取り込めませんでした。'); }
+  $('#importBtn').disabled = false;
+});
 function openGate(mode, err){
   S.gateMode = mode; const change = mode === 'change';
   $('#gateTitle').textContent = change ? 'パスワード変更' : 'メニュー管理';
@@ -400,6 +446,12 @@ function openGate(mode, err){
 }
 async function gateGo(){
   const v = $('#pw1').value, fail = t => { $('#gateErr').hidden = false; $('#gateErr').textContent = t; };
+  if (MODE === 'fb') {
+    if (!v) return;
+    const r = await (await FBP).login($('#em1').value, v);
+    if (!r.ok) fail(r.code === 'login' ? 'メールアドレスかパスワードが違います。' : r.code === 'many' ? '何度も間違えたため一時的にログインできません。少し待ってから試してください。' : 'ログインできませんでした。通信状況を確認してください。');
+    return;
+  }
   if (S.gateMode === 'login') { if (!v) return; S.pass = v; sess.set(v); $('#gateErr').hidden = true; return load(); }
   if (v.length < 4) return fail('4文字以上で入力してください。');
   if (v !== $('#pw2').value) return fail('2回の入力が一致しません。');
@@ -412,7 +464,12 @@ async function gateGo(){
 $('#gateGo').addEventListener('click', gateGo);
 $('#gate').addEventListener('keydown', e => { if (e.key === 'Enter') gateGo(); });
 $('#gateCancel').addEventListener('click', () => { $('#gate').hidden = true; });
-$('#passBtn').addEventListener('click', () => openGate('change'));
+$('#passBtn').addEventListener('click', async () => {
+  if (MODE !== 'fb') return openGate('change');
+  const fb = await FBP, email = fb.staffEmail(); if (!email) return;
+  const r = await fb.resetPass(email);
+  snack(r.ok ? `${email} にパスワード再設定のメールを送りました。メールのリンクから新しいパスワードを設定してください。` : '送れませんでした。通信状況を確認してください。');
+});
 
 function snack(text, undo){
   $('#snackText').textContent = text; $('#snackBtn').hidden = !undo; $('#snack').classList.add('on');
@@ -422,7 +479,14 @@ $('#snackBtn').addEventListener('click', () => { if (S.undo) { S.undo(); S.undo 
 
 document.title = CFG.SHOP_NAME + ' | メニュー管理';
 $('#demoNote').hidden = !DEMO;
-if (DEMO || S.pass) load(); else openGate('login');
+if (MODE === 'fb') {
+  $('#em1').hidden = false; $('#gateText').textContent = 'スタッフ用アカウントでログインしてください。';
+  $('#passBtn').textContent = 'パスワード再設定';
+  FBP.then(fb => fb.watchStaff(u => {
+    if (u) { $('#gate').hidden = true; load(); }
+    else { S.gateMode = 'login'; $('#gateErr').hidden = true; $('#gate').hidden = false; $('#em1').focus(); }
+  })).catch(() => { $('#cats').innerHTML = '<p class="state">読み込めませんでした。ページを開き直してください。</p>'; });
+} else if (DEMO || S.pass) load(); else openGate('login');
 </script>
 </body>
 </html>
