@@ -106,8 +106,9 @@ input{font:inherit;font-size:16px;color:var(--text);background:var(--field);bord
 
 <div class="gate" id="gate" hidden>
   <h2>お会計</h2>
-  <p>管理用パスワードを入力してください。この端末では次回から入力不要になります。</p>
-  <input type="password" id="pw" autocomplete="current-password" aria-label="パスワード">
+  <p id="gateText">管理用パスワードを入力してください。この端末では次回から入力不要になります。</p>
+  <input type="email" id="em" autocomplete="username" placeholder="スタッフ用メールアドレス" aria-label="メールアドレス" hidden>
+  <input type="password" id="pw" autocomplete="current-password" placeholder="パスワード" aria-label="パスワード">
   <p class="err" id="gateErr" hidden></p>
   <button class="primary" id="gateGo">ログイン</button>
 </div>
@@ -116,8 +117,10 @@ input{font:inherit;font-size:16px;color:var(--text);background:var(--field);bord
 
 <script>
 /* ===== 設定(config.js で上書き) ===== */
-const CFG = Object.assign({ GAS_URL:'', SHOP_NAME:'お店の名前', TAX_RATE:0.10, TAX_ROUND:'floor', CASHIER_POLL_MS:10000 }, window.MO_CONFIG || {});
-const DEMO = !CFG.GAS_URL;
+const CFG = Object.assign({ GAS_URL:'', FIREBASE:null, SHOP_NAME:'お店の名前', TAX_RATE:0.10, TAX_ROUND:'floor', CASHIER_POLL_MS:10000 }, window.MO_CONFIG || {});
+const MODE = CFG.FIREBASE && CFG.FIREBASE.projectId ? 'fb' : CFG.GAS_URL ? 'gas' : 'demo';
+const DEMO = MODE === 'demo';
+const FBP = MODE === 'fb' ? import('./fb.js') : null;
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
 const yen = n => Number(n || 0).toLocaleString('ja-JP') + '円';
@@ -145,6 +148,12 @@ if (DEMO && !store.get('mo_demo_cash_seeded', false)) {
   store.set('mo_demo_cash_seeded', true);
 }
 async function call(action, extra = {}){
+  if (MODE === 'fb') {   /* Firebase版:その卓の明細IDを直接会計済にする */
+    const fb = await FBP;
+    if (action === 'pay') { const t = S.tables.find(x => x.table === extra.table); const r = await fb.setPaid(t.lines.map(l => l.lineId), true); return { ok:true, stamp:r.payId, ids:t.lines.map(l => l.lineId) }; }
+    if (action === 'unpay') { await fb.setPaid(extra.ids, false); return { ok:true }; }
+    return { ok:true };
+  }
   if (DEMO) {
     const all = store.get('mo_demo_orders', []), open = all.filter(x => !x.call && !x.paid);
     if (action === 'tables') {
@@ -164,7 +173,15 @@ async function call(action, extra = {}){
 
 /* ===== 読み込み ===== */
 let timer = null;
+function applyLines(lines){   /* 明細を卓ごとにまとめる */
+  const by = new Map();
+  lines.forEach(l => { if (!by.has(l.table)) by.set(l.table, []); by.get(l.table).push(l); });
+  S.tables = [...by].map(([table, ls]) => ({ table, lines:ls, total:ls.reduce((a, l) => a + l.price * l.qty, 0) }))
+    .sort((a, b) => a.table.localeCompare(b.table, 'ja', { numeric:true }));
+  render();
+}
 async function poll(){
+  if (MODE === 'fb') return;   /* Firebase版は自動で最新になる */
   clearTimeout(timer);
   try {
     const res = await call('tables');
@@ -235,14 +252,14 @@ async function pay(){
     const res = await call('pay', { table:t.table, total:t.total });
     S.paying = false;
     if (!res.ok) { if (res.auth) return openGate(res.error); await poll(); render(); return snack(res.error || '会計済にできませんでした。'); }
-    S.last = { table:t.table, stamp:res.stamp };
+    S.last = { table:t.table, stamp:res.stamp, ids:res.ids };
     S.tables = S.tables.filter(x => x.table !== t.table); S.sel = null; render();
     snack(`卓${t.table} を会計済にしました(${TAX_PM ? '税込 ' : ''}${yen(incl(t.total))})`, true);
   } catch (e) { S.paying = false; render(); snack('会計済にできませんでした。通信状況を確認して、もう一度押してください。'); }
 }
 $('#snackBtn').addEventListener('click', async () => {
   const last = S.last; S.last = null; $('#snack').classList.remove('on'); if (!last) return;
-  try { const res = await call('unpay', last); if (!res.ok) throw new Error(res.error); S.sel = last.table; await poll(); }
+  try { const res = await call('unpay', last); if (!res.ok) throw new Error(res.error); S.sel = last.table; S.sig = null; render(); await poll(); }
   catch (e) { snack('取り消せませんでした。通信状況を確認してください。'); }
 });
 function snack(text, undo){
@@ -256,12 +273,35 @@ function openGate(err){
   $('#gateErr').hidden = !err; $('#gateErr').textContent = err || '';
   $('#pw').value = ''; $('#gate').hidden = false; $('#pw').focus();
 }
-function gateGo(){ const v = $('#pw').value; if (!v) return; S.pass = v; store.set('mo_staff_pass', v); $('#gateErr').hidden = true; poll(); }
+async function gateGo(){
+  const v = $('#pw').value; if (!v) return;
+  if (MODE === 'fb') {
+    const r = await (await FBP).login($('#em').value, v);
+    if (!r.ok) { $('#gateErr').hidden = false; $('#gateErr').textContent = r.code === 'login' ? 'メールアドレスかパスワードが違います。' : r.code === 'many' ? '何度も間違えたため一時的にログインできません。少し待ってから試してください。' : 'ログインできませんでした。通信状況を確認してください。'; }
+    return;
+  }
+  S.pass = v; store.set('mo_staff_pass', v); $('#gateErr').hidden = true; poll();
+}
 $('#gateGo').addEventListener('click', gateGo);
 $('#pw').addEventListener('keydown', e => { if (e.key === 'Enter') gateGo(); });
 
 $('#shopName').textContent = CFG.SHOP_NAME + ' お会計'; document.title = CFG.SHOP_NAME + ' | お会計';
-if (DEMO || S.pass) poll(); else openGate('');
+if (MODE === 'fb') {
+  /* Firebase版:注文・会計がすぐ反映される。スタッフ用アカウントでログイン(この端末では次回から不要) */
+  $('#em').hidden = false; $('#gateText').textContent = 'スタッフ用アカウントでログインしてください。この端末では次回から入力不要になります。';
+  const stat = (ok, t) => { $('#stat').className = ok ? 'stat' : 'stat off'; $('#stat').textContent = t; };
+  let off = null;
+  FBP.then(fb => fb.watchStaff(u => {
+    if (u) {
+      $('#gate').hidden = true;
+      if (!off) off = fb.watchUnpaid((lines, cached) => { applyLines(lines); cached ? stat(false, '通信できません。Wi-Fiを確認してください(最後に届いた内容を表示中)') : stat(true, 'リアルタイム受信中'); },
+        code => stat(false, code === 'permission' ? 'このアカウントでは表示できません。設定を確認してください' : '通信できません。Wi-Fiを確認してください'));
+    } else {
+      if (off) { off(); off = null; }
+      $('#gateErr').hidden = true; $('#gate').hidden = false; $('#em').focus();
+    }
+  })).catch(() => stat(false, '読み込めませんでした。ページを開き直してください'));
+} else if (DEMO || S.pass) poll(); else openGate('');
 </script>
 </body>
 </html>
