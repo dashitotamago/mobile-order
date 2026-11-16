@@ -21,6 +21,7 @@ try {   /* 端末に保存して、2回目以降はすぐ表示する */
 const LINES = F.collection(db, 'lines');
 const MENU = F.doc(db, 'config', 'menu');
 const MENU_PREV = F.doc(db, 'config', 'menu_prev');
+const TABLES = F.collection(db, 'tables');
 const CHUNK = 10;   /* 1回の書き込みで送る明細の数(セキュリティルールの照合回数の上限に合わせる) */
 
 /* 電波が切れていると書き込みの完了を待ち続けてしまうので、一定時間で「通信できない」扱いにする
@@ -78,22 +79,43 @@ async function saveMenu(list) {
   return { ok: true, count: list.length };
 }
 
+/* ---------- 卓(QRコード) ----------
+ * 卓ごとに固定のIDを持ち、QRコードはそのIDを指す(一度作ったQRはずっと使える)。
+ * 卓には「来店ごとの区切り(session)」があり、会計済にすると新しい区切りに切り替わる。
+ * 注文は今の区切りに対してだけ受け付けるので、会計後に前のお客様の画面から注文が入ることはない。 */
+const tableId = () => Array.from(crypto.getRandomValues(new Uint8Array(10)), b => 'abcdefghijkmnpqrstuvwxyz23456789'[b % 32]).join('');
+function watchTable(id, cb, onErr) {
+  return F.onSnapshot(F.doc(TABLES, id), s => cb(s.exists() ? { id, name: s.data().name, session: s.data().session } : null, s.metadata.fromCache),
+    e => onErr && onErr(err(e)));
+}
+function watchTables(cb, onErr) {
+  return F.onSnapshot(TABLES, s => cb(s.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => (a.order || 0) - (b.order || 0) || String(a.name).localeCompare(String(b.name), 'ja', { numeric: true }))),
+    e => onErr && onErr(err(e)));
+}
+async function addTable(name, order) {
+  const id = tableId();
+  await timeout(F.setDoc(F.doc(TABLES, id), { name, order, session: rid(), createdAt: F.serverTimestamp() }));
+  return { ok: true, id };
+}
+async function deleteTable(id) { await timeout(F.deleteDoc(F.doc(TABLES, id))); return { ok: true }; }
+async function renameTable(id, name) { await timeout(F.updateDoc(F.doc(TABLES, id), { name })); return { ok: true }; }
+
 /* ---------- 注文(お客様) ---------- */
 function lineDoc(orderId, i, d) {
   return [F.doc(LINES, orderId + '_' + i), {
-    kind: d.kind, orderId, table: d.table, itemId: d.itemId, name: d.name, price: d.price, qty: d.qty, note: d.note || '',
+    kind: d.kind, orderId, table: d.table, tableId: d.tableId, session: d.session, itemId: d.itemId, name: d.name, price: d.price, qty: d.qty, note: d.note || '',
     at: F.serverTimestamp(), uid: auth.currentUser.uid,
     served: false, servedAt: null, paid: d.kind === 'call', paidAt: null, payId: ''
   }];
 }
-async function placeOrder({ table, orderId, items, menu, retry }) {
+async function placeOrder({ table, tableId, session, orderId, items, menu, retry }) {
   const byId = new Map(menu.map(m => [m.id, m]));
   const unavailable = items.filter(it => { const m = byId.get(it.id); return !m || m.sold || m.hidden; }).map(it => it.id);
   if (unavailable.length) return { ok: false, unavailable };
   try {
     await anon();
     const docs = items.map((it, i) => { const m = byId.get(it.id);
-      return lineDoc(orderId, i, { kind: 'item', table, itemId: m.id, name: m.name, price: m.price, qty: it.qty, note: it.note }); });
+      return lineDoc(orderId, i, { kind: 'item', table, tableId, session, itemId: m.id, name: m.name, price: m.price, qty: it.qty, note: it.note }); });
     for (let i = 0; i < docs.length; i += CHUNK) {
       const part = docs.slice(i, i + CHUNK);
       /* 送り直しのときだけ、前回の分が届いていないか確かめる(二重登録の防止)。通常の注文では確認を省いて速く送る */
@@ -105,16 +127,22 @@ async function placeOrder({ table, orderId, items, menu, retry }) {
     return { ok: true };
   } catch (e) {
     const c = err(e);
-    if (c === 'permission') return { ok: false, stale: true, error: 'メニューが更新されたため注文できませんでした。内容を確認して、もう一度「注文を確定する」を押してください。' };
+    if (c === 'permission') {
+      /* 会計が済んで区切りが変わっていたら、その旨を返す */
+      const t = await F.getDoc(F.doc(TABLES, tableId)).catch(() => null);
+      if (t && (!t.exists() || t.data().session !== session)) return { ok: false, ended: true };
+      return { ok: false, stale: true, error: 'メニューが更新されたため注文できませんでした。内容を確認して、もう一度「注文を確定する」を押してください。' };
+    }
     throw e;
   }
 }
-async function callStaff(table) {
+async function callStaff({ table, tableId, session }) {
   await anon();
-  const open = await F.getDocs(F.query(LINES, F.where('table', '==', table), F.where('served', '==', false)));
+  const open = await F.getDocs(F.query(LINES, F.where('tableId', '==', tableId), F.where('served', '==', false)));
   if (open.docs.some(d => d.data().kind === 'call')) return { ok: true };
-  const [ref, data] = lineDoc('c' + rid(), 0, { kind: 'call', table, itemId: 'CALL', name: 'スタッフ呼び出し', price: 0, qty: 1 });
-  await timeout(F.setDoc(ref, data));
+  const [ref, data] = lineDoc('c' + rid(), 0, { kind: 'call', table, tableId, session, itemId: 'CALL', name: 'スタッフ呼び出し', price: 0, qty: 1 });
+  try { await timeout(F.setDoc(ref, data)); }
+  catch (e) { if (err(e) === 'permission') return { ok: false, ended: true }; throw e; }
   return { ok: true };
 }
 
@@ -122,15 +150,15 @@ async function callStaff(table) {
 const BILL_HOURS = 18, PENDING_HOURS = 12;
 function toLine(d) {
   const x = d.data({ serverTimestamps: 'estimate' });
-  return { lineId: d.id, orderId: x.orderId, at: ms(x.at), table: x.table, id: x.itemId, name: x.name, price: x.price, qty: x.qty,
+  return { lineId: d.id, orderId: x.orderId, at: ms(x.at), table: x.table, tableId: x.tableId || '', session: x.session || '', id: x.itemId, name: x.name, price: x.price, qty: x.qty,
     note: x.note || '', call: x.kind === 'call', served: !!x.served, paid: !!x.paid, payId: x.payId || '' };
 }
 const fresh = (l, h) => Date.now() - l.at < h * 3600e3;
 
-/* お客様の「履歴・会計」 */
-async function bill(table) {
+/* お客様の「履歴・会計」(今の来店の区切りの分だけ) */
+async function bill({ tableId, session }) {
   await anon();
-  const s = await F.getDocs(F.query(LINES, F.where('table', '==', table), F.where('paid', '==', false)));
+  const s = await F.getDocs(F.query(LINES, F.where('tableId', '==', tableId), F.where('session', '==', session)));
   const lines = s.docs.map(toLine).filter(l => !l.call && fresh(l, BILL_HOURS)).sort((a, b) => a.at - b.at);
   return { ok: true, lines, total: lines.reduce((a, l) => a + l.price * l.qty, 0) };
 }
@@ -150,15 +178,19 @@ function watchUnpaid(cb, onErr) {
   return F.onSnapshot(F.query(LINES, F.where('paid', '==', false)),
     s => cb(s.docs.map(toLine).filter(l => !l.call && fresh(l, BILL_HOURS)), s.metadata.fromCache), e => onErr && onErr(err(e)));
 }
-async function setPaid(lineIds, paid) {
+/* 会計済にする/戻す。sessions に [{id, session}] を渡すと、その卓の区切りも同時に切り替える
+   (会計済:新しい区切りにして、前のお客様の画面から注文できなくする / 取り消し:元の区切りに戻す) */
+async function setPaid(lineIds, paid, sessions = []) {
   const payId = paid ? rid() : '';
-  for (let i = 0; i < lineIds.length; i += 400) {
+  for (let i = 0; i < lineIds.length || (i === 0 && sessions.length); i += 400) {
     const b = F.writeBatch(db);
     lineIds.slice(i, i + 400).forEach(id => b.update(F.doc(LINES, id), { paid, paidAt: paid ? F.serverTimestamp() : null, payId }));
+    if (i === 0) sessions.forEach(t => b.update(F.doc(TABLES, t.id), { session: t.session }));
     await timeout(b.commit());
   }
   return { ok: true, payId };
 }
+const newSession = rid;
 
 /* ---------- 商品分析 ---------- */
 /* 指定期間(ミリ秒)の注文明細を取得する。呼び出しは除く */
@@ -175,4 +207,5 @@ function watchOnline(cb) {
 }
 
 export { anon, watchStaff, login, logout, resetPass, idToken, staffEmail, watchMenu, getMenu, saveMenu,
+  watchTable, watchTables, addTable, deleteTable, renameTable, newSession,
   placeOrder, callStaff, bill, watchPending, setServed, watchUnpaid, setPaid, getLines, watchOnline, err };
