@@ -344,12 +344,12 @@ function renderAll(){
   $('#rec').hidden = !rec.length;
   $('#recTrack').innerHTML = rec.map(m =>
     `<button class="rec-card" data-act="item" data-id="${esc(m.id)}"><span class="photo">${tile(m, 800)}</span>
-     <span class="cap"><b>${esc(m.name)}</b><i>${price(m.price)}</i></span></button>`).join('');
+     <span class="cap"><b>${esc(m.name)}</b><i>${yen(m.price)}</i></span></button>`).join('');
   $('#recDots').innerHTML = rec.length > 1 ? rec.map((_, i) => `<i${i ? '' : ' class="on"'}></i>`).join('') : '';
 
   const items = shown(), cats = [...new Set(items.map(m => m.cat))];
   $('#side').innerHTML = cats.map((c, i) => `<button data-act="jump" data-i="${i}" aria-current="${i === 0}">${esc(c)}</button>`).join('');
-  $('#list').innerHTML = cats.length ? (TAX_PM && CFG.TAX_NOTE ? `<p class="taxnote">${esc(CFG.TAX_NOTE)}</p>` : '') + cats.map((c, i) =>
+  $('#list').innerHTML = cats.length ? cats.map((c, i) =>
     `<section class="cat" id="cat-${i}"><h2>${esc(c)}</h2><div class="grid">${items.filter(m => m.cat === c).map(card).join('')}</div></section>`).join('')
     : '<p class="state">表示できる商品がありません。</p>';
   updateDots(); renderCartbar();
@@ -357,7 +357,7 @@ function renderAll(){
 function card(m){
   return `<button class="item${m.sold ? ' sold' : ''}" data-act="item" data-id="${esc(m.id)}"${m.sold ? ' disabled' : ''}>
     <span class="photo">${tile(m)}${m.badge && !m.sold ? `<span class="badge">${esc(m.badge)}</span>` : ''}${m.sold ? '<span class="stamp">売り切れ</span>' : ''}<span class="qty-dot" hidden></span></span>
-    <span class="nm">${esc(m.name)}</span><span class="pr">${price(m.price)}</span></button>`;
+    <span class="nm">${esc(m.name)}</span><span class="pr">${yen(m.price)}</span></button>`;
 }
 function updateDots(){
   document.querySelectorAll('.item').forEach(el => {
