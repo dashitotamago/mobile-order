@@ -160,8 +160,15 @@ if (DEMO && !store.get('mo_demo_cash_seeded', false)) {
 async function call(action, extra = {}){
   if (MODE === 'fb') {   /* Firebase版:その卓の明細IDを直接会計済にする */
     const fb = await FBP;
-    if (action === 'pay') { const t = S.tables.find(x => x.table === extra.table); const r = await fb.setPaid(t.lines.map(l => l.lineId), true); return { ok:true, stamp:r.payId, ids:t.lines.map(l => l.lineId) }; }
-    if (action === 'unpay') { await fb.setPaid(extra.ids, false); return { ok:true }; }
+    if (action === 'pay') {
+      /* 会計済にすると同時に、その卓の来店の区切りを新しくする(QRコードがリセットされ、次のお客様は0円から始まる) */
+      const t = S.tables.find(x => x.table === extra.table), ids = t.lines.map(l => l.lineId);
+      const last = new Map(); t.lines.filter(l => l.tableId).sort((a, b) => a.at - b.at).forEach(l => last.set(l.tableId, l.session));
+      const before = [...last].map(([id, session]) => ({ id, session }));
+      const r = await fb.setPaid(ids, true, before.map(x => ({ id:x.id, session:fb.newSession() })));
+      return { ok:true, stamp:r.payId, ids, before };
+    }
+    if (action === 'unpay') { await fb.setPaid(extra.ids, false, extra.before || []); return { ok:true }; }
     return { ok:true };
   }
   if (DEMO) {
@@ -243,7 +250,7 @@ function render(){
     <div class="total"><span>お会計金額${TAX_PM ? '(税込)' : ''}</span><b>${yen(incl(t.total))}</b></div>
     ${waiting ? `<p class="warn">まだ提供していない商品が${waiting}品あります。</p>` : ''}
     <button class="pay" data-pay${S.paying ? ' disabled' : ''}>${S.paying ? '処理中…' : '会計済にする'}</button>
-    <p class="hint">会計済にすると、この卓の注文履歴と金額が0に戻ります。次のお客様のために、お会計のたびに押してください。</p>`;
+    <p class="hint">会計済にすると、この卓の注文履歴と金額が0に戻り、卓のQRコードもリセットされます(前のお客様のスマホからは注文できなくなります)。お会計のたびに押してください。</p>`;
 }
 $('#tables').addEventListener('click', e => {
   const b = e.target.closest('[data-table]'); if (!b) return;
@@ -262,7 +269,7 @@ async function pay(){
     const res = await call('pay', { table:t.table, total:t.total });
     S.paying = false;
     if (!res.ok) { if (res.auth) return openGate(res.error); await poll(); render(); return snack(res.error || '会計済にできませんでした。'); }
-    S.last = { table:t.table, stamp:res.stamp, ids:res.ids };
+    S.last = { table:t.table, stamp:res.stamp, ids:res.ids, before:res.before };
     S.tables = S.tables.filter(x => x.table !== t.table); S.sel = null; render();
     snack(`卓${t.table} を会計済にしました(${TAX_PM ? '税込 ' : ''}${yen(incl(t.total))})`, true);
   } catch (e) { S.paying = false; render(); snack('会計済にできませんでした。通信状況を確認して、もう一度押してください。'); }
