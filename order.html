@@ -8,7 +8,15 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Shippori+Mincho:wght@700&family=Zen+Kaku+Gothic+New:wght@500;700;900&display=swap" rel="stylesheet">
+<link rel="preconnect" href="https://lh3.googleusercontent.com" crossorigin>
 <script src="config.js"></script>
+<script>/* Firebase版なら、画面の準備と並行してFirebaseの部品を先に読み込み始める(表示を速くする) */
+(() => { const c = window.MO_CONFIG || {}; if (!(c.FIREBASE && c.FIREBASE.projectId)) return;
+  const add = (rel, href, cors) => { const l = document.createElement('link'); l.rel = rel; l.href = href; if (cors) l.crossOrigin = ''; document.head.appendChild(l); };
+  ['https://firestore.googleapis.com', 'https://identitytoolkit.googleapis.com', 'https://www.gstatic.com'].forEach(u => add('preconnect', u, true));
+  add('modulepreload', 'fb.js');
+  ['app', 'auth', 'firestore'].forEach(n => add('modulepreload', 'https://www.gstatic.com/firebasejs/13.3.0/firebase-' + n + '.js'));
+})();</script>
 <style>
 :root{
   --bg:#262422; --rail:#1d1c1a; --panel:#322f2c; --chip:#45413c; --line:#4d4943;
@@ -204,6 +212,9 @@ const CFG = Object.assign({ GAS_URL:'', FIREBASE:null, SHOP_NAME:'お店の名�
 const MODE = CFG.FIREBASE && CFG.FIREBASE.projectId ? 'fb' : CFG.GAS_URL ? 'gas' : 'demo';
 const DEMO = MODE === 'demo';
 const FBP = MODE === 'fb' ? import('./fb.js') : null;
+/* Firebase版を開けなかったときに原因を調べて表示する(ブラウザによってエラー文が違うため、fb.js の有無を直接確かめる) */
+const fbWhy = e => fetch('fb.js', { cache:'no-store' }).then(r => r.ok ? 'Firebaseの部品を読み込めませんでした(' + String((e && e.message) || e || '').slice(0, 120) + ')' : 'fb.js が見つかりません。GitHubにアップされているか確認してください。').catch(() => '通信できません。Wi-Fiを確認してください。');
+
 const TABLE = (new URLSearchParams(location.search).get('t') || (DEMO ? 'デモ' : '')).trim().slice(0, 20);
 
 /* ===== デモ用メニュー(GAS未設定のときだけ使う) ===== */
@@ -312,11 +323,13 @@ function columns(name){
   for (let i = 0; i < ch.length; i += per) out.push(esc(ch.slice(i, i + per).join('')));
   return out.join('<br>');
 }
-const tile = m => `<span class="ph" style="--h:${hue(m.cat)}"><span>${columns(m.name)}</span></span>`
-  + (m.img ? `<img src="${esc(m.img)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="imgFail(this)">` : '');
+/* 一覧の小さい写真は小さいサイズで読み込む(Googleドライブの写真のみ。通信量を減らして表示を速くする) */
+const sized = (url, w) => String(url).replace(/^(https:\/\/lh3\.googleusercontent\.com\/d\/[\w-]+)(=w\d+)?$/, (_, base) => base + '=w' + w);
+const tile = (m, w = 400) => `<span class="ph" style="--h:${hue(m.cat)}"><span>${columns(m.name)}</span></span>`
+  + (m.img ? `<img src="${esc(sized(m.img, w))}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer" data-w="${w}" onerror="imgFail(this)">` : '');
 function imgFail(el){   /* 写真の配信元を1回だけ切り替えて再試行し、だめなら品名タイルに戻す */
   const m = el.src.match(/^https:\/\/lh3\.googleusercontent\.com\/d\/([\w-]+)/);
-  if (m && !el.dataset.retry) { el.dataset.retry = 1; el.src = 'https://drive.google.com/thumbnail?id=' + m[1] + '&sz=w800'; }
+  if (m && !el.dataset.retry) { el.dataset.retry = 1; el.src = 'https://drive.google.com/thumbnail?id=' + m[1] + '&sz=w' + (el.dataset.w || 800); }
   else el.remove();
 }
 const shown = () => S.group === 'all' ? S.menu : S.menu.filter(m => m.group === S.group);
@@ -330,7 +343,7 @@ function renderAll(){
   const rec = S.group === 'all' ? S.menu.filter(m => m.rec && !m.sold) : [];
   $('#rec').hidden = !rec.length;
   $('#recTrack').innerHTML = rec.map(m =>
-    `<button class="rec-card" data-act="item" data-id="${esc(m.id)}"><span class="photo">${tile(m)}</span>
+    `<button class="rec-card" data-act="item" data-id="${esc(m.id)}"><span class="photo">${tile(m, 800)}</span>
      <span class="cap"><b>${esc(m.name)}</b><i>${price(m.price)}</i></span></button>`).join('');
   $('#recDots').innerHTML = rec.length > 1 ? rec.map((_, i) => `<i${i ? '' : ' class="on"'}></i>`).join('') : '';
 
@@ -373,7 +386,7 @@ function openItem(id){
   const m = byId(id); if (!m || m.sold) return;
   S.view = 'item'; S.draft = { id, qty:1 };
   sheet('商品を追加', `<div class="detail">
-      <span class="photo">${tile(m)}</span>
+      <span class="photo">${tile(m, 800)}</span>
       <h4>${esc(m.name)}</h4><p class="pr">${price(m.price)}</p>
       ${m.desc ? `<p class="desc">${esc(m.desc)}</p>` : ''}
       ${CFG.ALLOW_NOTE ? `<label class="note">お店へのメモ(任意)<input id="note" maxlength="40" placeholder="例:氷なし" value="${esc(S.cart[id]?.note || '')}"></label>` : ''}
@@ -412,7 +425,7 @@ async function sendOrder(){
   const orderId = S.pendingId || uid();
   let res, failed = '';
   try {
-    res = await api.order({ table:TABLE, orderId, items:lines.map(l => ({ id:l.id, qty:l.qty, note:l.note || '' })) });
+    res = await api.order({ table:TABLE, orderId, retry:!!S.pendingId, items:lines.map(l => ({ id:l.id, qty:l.qty, note:l.note || '' })) });
   } catch (e) { failed = '送信できませんでした。電波の良い場所でもう一度「注文を確定する」を押してください。'; }
   S.sending = false;
   if (failed) { S.pendingId = orderId; return openCart(failed); }
@@ -537,7 +550,7 @@ $('#noTable').hidden = !!TABLE; $('#demoNote').hidden = !DEMO;
 if (MODE === 'fb') {
   /* Firebase版:メニュー・売り切れの変更が即座に届く */
   FBP.then(fb => { fb.watchMenu(list => { if (list.length) applyMenu(list); else if (!S.menu.length) $('#list').innerHTML = '<p class="state">メニューの準備中です。スタッフにお声がけください。</p>'; }, menuFail); fb.anon().catch(() => {}); })
-     .catch(menuFail);
+     .catch(async e => { console.error(e); menuFail(); const why = await fbWhy(e); if (!S.menu.length) $('#list').insertAdjacentHTML('beforeend', '<p class="state" style="padding-top:0;font-size:12px">' + esc(why) + '</p>'); });
 } else {
   loadMenu();
   setInterval(() => { if (!document.hidden) loadMenu(); }, 60000);   /* 売り切れの反映 */
