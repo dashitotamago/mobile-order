@@ -161,6 +161,11 @@ button:disabled{cursor:default}
 .done svg{width:64px;height:64px;stroke:var(--accent);fill:none;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round}
 .done h4{font-size:20px;font-weight:900;margin-top:10px}
 .done p{color:var(--mute);font-size:14px;margin-top:6px}
+.ended{position:fixed;inset:0;z-index:70;display:grid;place-content:center;justify-items:center;gap:12px;padding:24px;text-align:center;background:var(--bg)}
+.ended svg{width:64px;height:64px;stroke:var(--accent);fill:none;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round}
+.ended h2{font-size:22px;font-weight:900}
+.ended p{color:var(--mute);font-size:14px;max-width:22em}
+.ended .primary{width:auto;padding:16px 28px;margin-top:8px}
 .toast{position:fixed;left:50%;top:calc(18px + env(safe-area-inset-top));z-index:60;transform:translate(-50%,-400%);
   max-width:88vw;padding:12px 18px;border-radius:99px;background:#f6f2e9;color:#231f1a;font-weight:700;font-size:14px;
   transition:transform .25s;box-shadow:0 6px 20px #0008}
@@ -204,6 +209,12 @@ button:disabled{cursor:default}
 <div class="scrim" id="scrim" data-act="close"></div>
 <div class="sheet" id="sheet" role="dialog" aria-modal="true"></div>
 <div class="toast" id="toast" role="status"></div>
+<div class="ended" id="ended" hidden role="dialog" aria-modal="true" aria-labelledby="endedTitle">
+  <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9.5"/><path d="M7.5 12.5l3 3 6-6.5"/></svg>
+  <h2 id="endedTitle">お会計が完了しました</h2>
+  <p>ご来店ありがとうございました。<br>追加でご注文される場合は、卓上のQRコードをもう一度読み取ってください。</p>
+  <button class="primary" data-act="rescan">メニューを開き直す</button>
+</div>
 
 <script>
 /* ===== 設定(config.js で上書き) ===== */
@@ -288,10 +299,10 @@ const api = DEMO ? {
       .map(x => ({ orderId:x.orderId, at:x.at, name:x.name, price:x.price || 0, qty:x.qty, served:!!x.served }));
     return { ok:true, lines, total:lines.reduce((a, l) => a + l.price * l.qty, 0) };
   }
-} : MODE === 'fb' ? {
-  order: async b => (await FBP).placeOrder({ ...b, menu:S.menu }),
-  call: async b => (await FBP).callStaff(b.table),
-  bill: async t => (await FBP).bill(t)
+} : MODE === 'fb' ? {   /* Firebase版:QRに入っている卓ID・今の来店の区切りで送る */
+  order: async b => (await FBP).placeOrder({ ...b, table:S.tbl.name, tableId:TABLE, session:S.session, menu:S.menu }),
+  call: async () => (await FBP).callStaff({ table:S.tbl.name, tableId:TABLE, session:S.session }),
+  bill: async () => (await FBP).bill({ tableId:TABLE, session:S.session })
 } : {
   async menu(){ return (await fetch(CFG.GAS_URL + '?action=menu&_=' + Date.now())).json(); },
   order: b => post({ action:'order', ...b }),
@@ -305,13 +316,16 @@ async function post(body){
 
 /* ===== 状態 ===== */
 const CART_KEY = 'mo_cart_' + TABLE;
-const S = { menu:[], sig:'', group:'all', cart:{}, draft:null, pendingId:null, sending:false, view:null };
-(() => { const c = store.get(CART_KEY, null); if (c && Date.now() - c.at < 2 * 3600e3) S.cart = c.lines || {}; })();
+const S = { menu:[], sig:'', group:'all', cart:{}, draft:null, pendingId:null, sending:false, view:null, tbl:null, session:null, ended:false, cartSession:null };
+(() => { const c = store.get(CART_KEY, null); if (c && Date.now() - c.at < 2 * 3600e3) { S.cart = c.lines || {}; S.cartSession = c.session || null; } })();
+/* 注文できる状態か(Firebase版は卓の情報が届いていて、会計済になっていないこと) */
+const canOrder = () => !!TABLE && (MODE !== 'fb' || (!!S.tbl && !S.ended));
+const tableName = () => MODE === 'fb' ? (S.tbl ? S.tbl.name : '') : TABLE;
 const byId = id => S.menu.find(m => m.id === id);
 const cartLines = () => Object.values(S.cart).filter(l => byId(l.id));
 const cartCount = () => cartLines().reduce((a, l) => a + l.qty, 0);
 const cartTotal = () => cartLines().reduce((a, l) => a + l.qty * byId(l.id).price, 0);
-function saveCart(){ S.pendingId = null; store.set(CART_KEY, { at:Date.now(), lines:S.cart }); renderCartbar(); updateDots(); }
+function saveCart(){ S.pendingId = null; store.set(CART_KEY, { at:Date.now(), lines:S.cart, session:S.session }); renderCartbar(); updateDots(); }
 function setQty(id, q){ if (q <= 0) delete S.cart[id]; else S.cart[id] = { ...(S.cart[id] || { id, note:'' }), qty:Math.min(q, 99) }; saveCart(); }
 
 /* ===== 描画 ===== */
@@ -415,11 +429,11 @@ function openCart(msg){
     + `${totals(cartTotal(), '合計')}
        <p class="hint">お会計はお帰りの際にレジでお願いします。</p>
        ${msg ? `<p class="err">${esc(msg)}</p>` : ''}`,
-    `<button class="primary" data-act="send"${S.sending || !TABLE ? ' disabled' : ''}>${S.sending ? '送信中…' : '注文を確定する'}</button>`);
+    `<button class="primary" data-act="send"${S.sending || !canOrder() ? ' disabled' : ''}>${S.sending ? '送信中…' : '注文を確定する'}</button>`);
 }
 
 async function sendOrder(){
-  if (S.sending || !TABLE) return;
+  if (S.sending || !canOrder()) return;
   const lines = cartLines(); if (!lines.length) return;
   S.sending = true; openCart();
   const orderId = S.pendingId || uid();
@@ -429,6 +443,7 @@ async function sendOrder(){
   } catch (e) { failed = '送信できませんでした。電波の良い場所でもう一度「注文を確定する」を押してください。'; }
   S.sending = false;
   if (failed) { S.pendingId = orderId; return openCart(failed); }
+  if (res.ended) return showEnded();
   if (res.ok) {
     S.cart = {}; saveCart(); S.view = 'done';
     return sheet('', `<div class="done"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9.5"/><path d="M7.5 12.5l3 3 6-6.5"/></svg>
@@ -446,7 +461,7 @@ async function sendOrder(){
 async function openHistory(){
   const title = 'ご注文履歴とお会計';
   S.view = 'history';
-  if (!TABLE) return sheet(title, '<p class="state">卓番号を読み取れていません。卓上のQRコードをもう一度読み取ってください。</p>');
+  if (!canOrder()) return sheet(title, '<p class="state">卓番号を読み取れていません。卓上のQRコードをもう一度読み取ってください。</p>');
   sheet(title, '<p class="state">読み込んでいます…</p>');
   let res;
   try { res = await api.bill(TABLE); if (!res.ok) throw new Error(res.error); }
@@ -462,17 +477,17 @@ async function openHistory(){
       `<p class="when">${new Date(ls[0].at).toLocaleTimeString('ja-JP', { hour:'2-digit', minute:'2-digit' })} のご注文</p>`
       + ls.map(l => `<div class="row"><div class="t"><b>${esc(l.name)}${l.served ? '' : '<span class="wait">準備中</span>'}</b><small>${yen(l.price)} × ${l.qty}</small></div><span class="amt">${yen(l.price * l.qty)}</span></div>`).join('')).join('')
     + `${totals(res.total, 'お会計金額')}
-       <p class="hint">この卓のご注文をまとめて表示しています。お会計はレジで、卓番号「${esc(TABLE)}」をお伝えください。</p>`;
+       <p class="hint">この卓のご注文をまとめて表示しています。お会計はレジで、卓番号「${esc(tableName())}」をお伝えください。</p>`;
   sheet(title, body);
 }
 function openCall(){
   S.view = 'call';
   sheet('スタッフを呼びますか?', '<p class="hint" style="font-size:14px">スタッフが席までうかがいます。</p>',
-    `<button class="primary" data-act="call-go"${TABLE ? '' : ' disabled'}>スタッフを呼ぶ</button><button class="ghost" data-act="close">やめる</button>`);
+    `<button class="primary" data-act="call-go"${canOrder() ? '' : ' disabled'}>スタッフを呼ぶ</button><button class="ghost" data-act="close">やめる</button>`);
 }
 async function sendCall(){
   closeSheet();
-  try { const r = await api.call({ table:TABLE }); toast(r.ok ? 'スタッフを呼びました' : '呼び出せませんでした。お声がけください。'); }
+  try { const r = await api.call({ table:TABLE }); if (r.ended) return showEnded(); toast(r.ok ? 'スタッフを呼びました' : '呼び出せませんでした。お声がけください。'); }
   catch (e) { toast('呼び出せませんでした。お声がけください。'); }
 }
 
@@ -495,6 +510,7 @@ document.addEventListener('click', e => {
   else if (a === 'call-go') sendCall();
   else if (a === 'close') { if (!S.sending) closeSheet(); }
   else if (a === 'reload') loadMenu(true);
+  else if (a === 'rescan') location.reload();
 });
 document.addEventListener('keydown', e => { if (e.key === 'Escape' && !S.sending) closeSheet(); });
 
@@ -545,10 +561,34 @@ async function loadMenu(showLoading){
 /* 前回のメニューを先に出して、すぐ操作できるようにする(最新は届きしだい差し替え) */
 (() => { const c = store.get(MENU_CACHE, null); if (!DEMO && Array.isArray(c) && c.length) applyMenu(c); })();
 $('#shopName').textContent = CFG.SHOP_NAME; document.title = CFG.SHOP_NAME + ' | ご注文';
-if (TABLE) { $('#tableChip').hidden = false; $('#tableChip').textContent = '卓 ' + TABLE; }
+if (TABLE && MODE !== 'fb') { $('#tableChip').hidden = false; $('#tableChip').textContent = '卓 ' + TABLE; }
 $('#noTable').hidden = !!TABLE; $('#demoNote').hidden = !DEMO;
+
+/* 会計済になったとき(この画面からは注文できなくなる)。スタッフが取り消したら元に戻る */
+function showEnded(){
+  S.ended = true; closeSheet(); S.cart = {}; saveCart();
+  $('#ended').hidden = false; document.body.style.overflow = 'hidden';
+}
+function hideEnded(){ S.ended = false; $('#ended').hidden = true; document.body.style.overflow = ''; }
+/* Firebase版:QRの卓IDから卓名と今の来店の区切りを受け取る(会計済で区切りが変わるとすぐ分かる) */
+function onTable(t){
+  if (!t) {
+    S.tbl = null; $('#tableChip').hidden = true;
+    $('#noTable').hidden = false; $('#noTable').textContent = 'このQRコードは現在使われていません。スタッフにお声がけください。';
+    return;
+  }
+  S.tbl = t; $('#noTable').hidden = true;
+  $('#tableChip').hidden = false; $('#tableChip').textContent = '卓 ' + t.name;
+  if (S.session === null) {
+    S.session = t.session;
+    if (S.cartSession && S.cartSession !== t.session) { S.cart = {}; }   /* 前回の来店のカートは使わない */
+    saveCart();
+  } else if (t.session !== S.session) showEnded();
+  else if (S.ended) hideEnded();
+}
 if (MODE === 'fb') {
   /* Firebase版:メニュー・売り切れの変更が即座に届く */
+  if (TABLE) FBP.then(fb => fb.watchTable(TABLE, onTable)).catch(() => {});
   FBP.then(fb => { fb.watchMenu(list => { if (list.length) applyMenu(list); else if (!S.menu.length) $('#list').innerHTML = '<p class="state">メニューの準備中です。スタッフにお声がけください。</p>'; }, menuFail); fb.anon().catch(() => {}); })
      .catch(async e => { console.error(e); menuFail(); const why = await fbWhy(e); if (!S.menu.length) $('#list').insertAdjacentHTML('beforeend', '<p class="state" style="padding-top:0;font-size:12px">' + esc(why) + '</p>'); });
 } else {
