@@ -86,7 +86,7 @@ function lineDoc(orderId, i, d) {
     served: false, servedAt: null, paid: d.kind === 'call', paidAt: null, payId: ''
   }];
 }
-async function placeOrder({ table, orderId, items, menu }) {
+async function placeOrder({ table, orderId, items, menu, retry }) {
   const byId = new Map(menu.map(m => [m.id, m]));
   const unavailable = items.filter(it => { const m = byId.get(it.id); return !m || m.sold || m.hidden; }).map(it => it.id);
   if (unavailable.length) return { ok: false, unavailable };
@@ -96,8 +96,8 @@ async function placeOrder({ table, orderId, items, menu }) {
       return lineDoc(orderId, i, { kind: 'item', table, itemId: m.id, name: m.name, price: m.price, qty: it.qty, note: it.note }); });
     for (let i = 0; i < docs.length; i += CHUNK) {
       const part = docs.slice(i, i + CHUNK);
-      /* 電波が悪くて送り直したときに二重に登録しない */
-      if ((await timeout(F.getDoc(part[0][0]), 8000).catch(() => null))?.exists()) continue;
+      /* 送り直しのときだけ、前回の分が届いていないか確かめる(二重登録の防止)。通常の注文では確認を省いて速く送る */
+      if (retry && (await timeout(F.getDoc(part[0][0]), 8000).catch(() => null))?.exists()) continue;
       const b = F.writeBatch(db);
       part.forEach(([ref, data]) => b.set(ref, data));
       await timeout(b.commit());
@@ -123,7 +123,7 @@ const BILL_HOURS = 18, PENDING_HOURS = 12;
 function toLine(d) {
   const x = d.data({ serverTimestamps: 'estimate' });
   return { lineId: d.id, orderId: x.orderId, at: ms(x.at), table: x.table, id: x.itemId, name: x.name, price: x.price, qty: x.qty,
-    note: x.note || '', call: x.kind === 'call', served: !!x.served, paid: !!x.paid };
+    note: x.note || '', call: x.kind === 'call', served: !!x.served, paid: !!x.paid, payId: x.payId || '' };
 }
 const fresh = (l, h) => Date.now() - l.at < h * 3600e3;
 
@@ -160,6 +160,14 @@ async function setPaid(lineIds, paid) {
   return { ok: true, payId };
 }
 
+/* ---------- 商品分析 ---------- */
+/* 指定期間(ミリ秒)の注文明細を取得する。呼び出しは除く */
+async function getLines(from, to) {
+  const s = await timeout(F.getDocs(F.query(LINES,
+    F.where('at', '>=', F.Timestamp.fromMillis(from)), F.where('at', '<', F.Timestamp.fromMillis(to)))), 30000);
+  return s.docs.map(toLine).filter(l => !l.call);
+}
+
 /* 接続状態(通信が切れているとき画面に出す) */
 function watchOnline(cb) {
   const f = () => cb(navigator.onLine);
@@ -167,4 +175,4 @@ function watchOnline(cb) {
 }
 
 export { anon, watchStaff, login, logout, resetPass, idToken, staffEmail, watchMenu, getMenu, saveMenu,
-  placeOrder, callStaff, bill, watchPending, setServed, watchUnpaid, setPaid, watchOnline, err };
+  placeOrder, callStaff, bill, watchPending, setServed, watchUnpaid, setPaid, getLines, watchOnline, err };
