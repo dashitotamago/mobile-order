@@ -4,37 +4,78 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex">
-<title>卓上QRコード作成</title>
+<title>卓とQRコード</title>
 <script src="config.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <style>
 *{box-sizing:border-box;margin:0}
 body{font-family:"Hiragino Sans","Noto Sans JP","Yu Gothic UI",sans-serif;background:#f3f1ec;color:#231f1a;line-height:1.5;padding:20px}
-.panel{max-width:720px;margin:0 auto 24px;padding:20px;background:#fff;border-radius:12px}
-h1{font-size:20px;margin-bottom:14px}
+[hidden]{display:none!important}
+.panel{max-width:760px;margin:0 auto 24px;padding:20px;background:#fff;border-radius:12px}
+h1{font-size:20px;margin-bottom:6px}
+.lead{font-size:13.5px;color:#6b665c}
 label{display:block;font-size:13px;font-weight:700;margin-top:14px}
 input,textarea{display:block;width:100%;margin-top:6px;padding:10px;border:1px solid #c9c4b8;border-radius:8px;font:inherit;font-size:16px}
 textarea{height:150px}
 .help{font-size:12.5px;color:#6b665c;margin-top:4px;font-weight:400}
-.btns{display:flex;gap:10px;margin-top:18px}
+.btns{display:flex;flex-wrap:wrap;gap:10px;margin-top:18px}
 button{font:inherit;font-weight:700;padding:12px 22px;border-radius:10px;border:0;background:#231f1a;color:#fff;cursor:pointer}
+button:disabled{opacity:.4;cursor:default}
 button.sub{background:#e4e0d6;color:#231f1a}
+button.danger{background:#fff;color:#b3261e;border:1px solid #e3b9b5}
+button.danger.armed{background:#b3261e;color:#fff;border-color:#b3261e}
+:focus-visible{outline:2px solid #c98500;outline-offset:2px}
+.addrow{display:flex;gap:8px;margin-top:6px}
+.addrow input{margin-top:0;flex:1}
+.err{margin-top:10px;font-size:13.5px;font-weight:700;color:#b3261e}
+.count{margin-top:16px;font-size:13px;color:#6b665c}
 .cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:16px;max-width:1000px;margin:0 auto}
-.card{background:#fff;border:2px solid #231f1a;border-radius:14px;padding:18px 16px;text-align:center;break-inside:avoid}
+.card{background:#fff;border:2px solid #231f1a;border-radius:14px;padding:18px 16px;text-align:center;break-inside:avoid;position:relative}
 .card .shop{font-size:14px;font-weight:700}
-.card .qr{display:grid;place-items:center;margin:12px 0}
+.card .qr{display:grid;place-items:center;margin:12px 0;min-height:180px}
 .card .qr img,.card .qr canvas{width:180px;height:180px}
 .card .how{font-size:13px}
 .card .no{margin-top:8px;font-size:15px;font-weight:700}
 .card .no b{font-size:30px;margin-left:6px}
+.card .tools{display:flex;justify-content:center;gap:8px;margin-top:14px}
+.card .tools button{padding:8px 14px;font-size:13px}
+.empty{grid-column:1/-1;text-align:center;color:#6b665c;padding:40px 0}
+.gate{position:fixed;inset:0;z-index:20;display:grid;place-content:center;gap:12px;padding:24px;background:#f3f1ec}
+.gate h2{font-size:22px}
+.gate p{font-size:14px;color:#6b665c;max-width:24em}
+.gate input{width:min(320px,80vw);margin:0}
+.gate button{justify-self:start}
+.toast{position:fixed;left:50%;bottom:20px;transform:translate(-50%,200%);background:#231f1a;color:#fff;padding:12px 20px;border-radius:12px;font-size:14px;font-weight:700;transition:transform .2s;max-width:92vw}
+.toast.on{transform:translate(-50%,0)}
 @media print{
-  body{background:#fff;padding:0}.panel{display:none}
+  body{background:#fff;padding:0}.panel,.card .tools,.toast{display:none!important}
   .cards{grid-template-columns:repeat(3,1fr);gap:8mm}
 }
+@media (prefers-reduced-motion:reduce){.toast{transition:none}}
 </style>
 </head>
 <body>
-<div class="panel">
+
+<!-- Firebase版:卓を登録して、卓ごとに固定のQRコードを作る -->
+<div class="panel" id="fbPanel" hidden>
+  <h1>卓とQRコード</h1>
+  <p class="lead">卓を追加すると、その卓専用のQRコードができます。QRコードは一度作るとずっと同じなので、印刷したものをそのまま使い続けられます。会計画面で「会計済にする」を押すと、その卓の注文が0円に戻り、前のお客様のスマホからは注文できなくなります。</p>
+  <label for="newName">卓を追加</label>
+  <div class="addrow">
+    <input id="newName" maxlength="20" placeholder="例:1、カウンター1、座敷A" autocomplete="off">
+    <button id="addBtn">追加する</button>
+  </div>
+  <span class="help">名前に複数行を貼り付けると、まとめて追加できます。</span>
+  <p class="err" id="addErr" hidden></p>
+  <label for="base">注文ページのURL</label>
+  <input id="baseFb" inputmode="url">
+  <span class="help">GitHub Pages に置いた order.html のURLです。通常は変更不要です。</span>
+  <div class="btns"><button class="sub" id="printFb">QRコードを印刷する</button></div>
+  <p class="count" id="count"></p>
+</div>
+
+<!-- GAS版・デモ:今までどおり卓名からQRコードを作る -->
+<div class="panel" id="oldPanel" hidden>
   <h1>卓上QRコードを作る</h1>
   <label>注文ページのURL
     <input id="base" inputmode="url">
@@ -46,28 +87,136 @@ button.sub{background:#e4e0d6;color:#231f1a}
   </label>
   <div class="btns"><button id="make">QRコードを作る</button><button class="sub" id="print">印刷する</button></div>
 </div>
+
 <div class="cards" id="cards"></div>
+
+<div class="gate" id="gate" hidden>
+  <h2>卓とQRコード</h2>
+  <p>スタッフ用アカウントでログインしてください。この端末では次回から入力不要になります。</p>
+  <input type="email" id="em" autocomplete="username" placeholder="スタッフ用メールアドレス" aria-label="メールアドレス">
+  <input type="password" id="pw" autocomplete="current-password" placeholder="パスワード" aria-label="パスワード">
+  <p class="err" id="gateErr" hidden></p>
+  <button id="gateGo">ログイン</button>
+</div>
+<div class="toast" id="toast" role="status"></div>
+
 <script>
-const CFG = Object.assign({ SHOP_NAME:'お店の名前' }, window.MO_CONFIG || {});
+const CFG = Object.assign({ SHOP_NAME:'お店の名前', FIREBASE:null }, window.MO_CONFIG || {});
+const MODE = CFG.FIREBASE && CFG.FIREBASE.projectId ? 'fb' : 'old';
+const FBP = MODE === 'fb' ? import('./fb.js') : null;
 const $ = s => document.querySelector(s);
-$('#base').value = location.href.split(/[?#]/)[0].replace(/[^/]*$/, 'order.html');
-$('#tables').value = Array.from({ length:8 }, (_, i) => i + 1).join('\n');
-function make(){
-  const base = $('#base').value.trim(), box = $('#cards'); box.textContent = '';
-  $('#tables').value.split('\n').map(s => s.trim()).filter(Boolean).forEach(t => {
-    const card = document.createElement('div'); card.className = 'card';
-    const shop = document.createElement('p'); shop.className = 'shop'; shop.textContent = CFG.SHOP_NAME;
-    const qr = document.createElement('div'); qr.className = 'qr';
-    const how = document.createElement('p'); how.className = 'how'; how.textContent = 'スマートフォンで読み取ってご注文ください';
-    const no = document.createElement('p'); no.className = 'no'; no.append('卓'); const b = document.createElement('b'); b.textContent = t; no.append(b);
-    card.append(shop, qr, how, no); box.append(card);
-    if (window.QRCode) new QRCode(qr, { text:base + '?t=' + encodeURIComponent(t), width:360, height:360, correctLevel:QRCode.CorrectLevel.M });
-    else qr.textContent = 'QRコードを作れませんでした。通信状況を確認して読み込み直してください。';
+const orderUrl = location.href.split(/[?#]/)[0].replace(/[^/]*$/, 'order.html');
+
+function toast(t){ const el = $('#toast'); el.textContent = t; el.classList.add('on'); clearTimeout(toast.t); toast.t = setTimeout(() => el.classList.remove('on'), 3500); }
+
+/* QRコードのカード(卓名は textContent で入れる) */
+function card(name, url, tools){
+  const c = document.createElement('div'); c.className = 'card';
+  const shop = document.createElement('p'); shop.className = 'shop'; shop.textContent = CFG.SHOP_NAME;
+  const qr = document.createElement('div'); qr.className = 'qr';
+  const how = document.createElement('p'); how.className = 'how'; how.textContent = 'スマートフォンで読み取ってご注文ください';
+  const no = document.createElement('p'); no.className = 'no'; no.append('卓'); const b = document.createElement('b'); b.textContent = name; no.append(b);
+  c.append(shop, qr, how, no);
+  if (tools) c.append(tools);
+  if (window.QRCode) new QRCode(qr, { text:url, width:360, height:360, correctLevel:QRCode.CorrectLevel.M });
+  else qr.textContent = 'QRコードを作れませんでした。通信状況を確認して読み込み直してください。';
+  return c;
+}
+
+/* ===== Firebase版 ===== */
+let tables = [], armed = null;
+function renderTables(){
+  const box = $('#cards'), base = $('#baseFb').value.trim() || orderUrl;
+  box.textContent = '';
+  $('#count').textContent = tables.length ? `登録されている卓:${tables.length}卓` : '';
+  if (!tables.length) { const p = document.createElement('p'); p.className = 'empty'; p.textContent = 'まだ卓がありません。上の「卓を追加」から登録してください。'; box.append(p); return; }
+  tables.forEach(t => {
+    const tools = document.createElement('div'); tools.className = 'tools';
+    const ren = document.createElement('button'); ren.className = 'sub'; ren.textContent = '名前を変える'; ren.dataset.rename = t.id;
+    const del = document.createElement('button'); del.className = 'danger' + (armed === t.id ? ' armed' : ''); del.dataset.del = t.id;
+    del.textContent = armed === t.id ? '本当に削除する' : '削除';
+    tools.append(ren, del);
+    box.append(card(t.name, base + '?t=' + encodeURIComponent(t.id), tools));
   });
 }
-$('#make').addEventListener('click', make);
-$('#print').addEventListener('click', () => print());
-make();
+async function addTables(){
+  const names = $('#newName').value.split(/\r?\n/).map(s => s.trim().slice(0, 20)).filter(Boolean);
+  const err = t => { $('#addErr').hidden = false; $('#addErr').textContent = t; };
+  $('#addErr').hidden = true;
+  if (!names.length) return err('卓の名前を入れてください。');
+  const exists = new Set(tables.map(t => t.name));
+  const dup = names.filter((n, i) => exists.has(n) || names.indexOf(n) !== i);
+  if (dup.length) return err(`「${[...new Set(dup)].join('」「')}」はすでにあります。別の名前にしてください。`);
+  $('#addBtn').disabled = true;
+  try {
+    const fb = await FBP; let order = tables.reduce((a, t) => Math.max(a, t.order || 0), 0);
+    for (const n of names) await fb.addTable(n, ++order);
+    $('#newName').value = ''; toast(`${names.length}卓を追加しました`);
+  } catch (e) { err('追加できませんでした。通信状況と、ログインしているアカウントを確認してください。'); }
+  $('#addBtn').disabled = false;
+}
+$('#addBtn').addEventListener('click', addTables);
+$('#newName').addEventListener('keydown', e => { if (e.key === 'Enter' && !e.isComposing) addTables(); });
+$('#newName').addEventListener('paste', e => {   /* 複数行の貼り付けを受け付ける */
+  const t = (e.clipboardData || window.clipboardData).getData('text');
+  if (/\n/.test(t)) { e.preventDefault(); $('#newName').value = t; addTables(); }
+});
+$('#baseFb').addEventListener('change', renderTables);
+$('#printFb').addEventListener('click', () => print());
+$('#cards').addEventListener('click', async e => {
+  const del = e.target.closest('[data-del]'), ren = e.target.closest('[data-rename]');
+  if (del) {
+    const id = del.dataset.del;
+    if (armed !== id) { armed = id; renderTables(); setTimeout(() => { if (armed === id) { armed = null; renderTables(); } }, 5000); return; }   /* 2回押しで削除 */
+    armed = null;
+    try { await (await FBP).deleteTable(id); toast('削除しました。この卓のQRコードは使えなくなりました。'); }
+    catch (er) { toast('削除できませんでした。通信状況を確認してください。'); renderTables(); }
+  }
+  if (ren) {
+    const t = tables.find(x => x.id === ren.dataset.rename); if (!t) return;
+    const name = (prompt('新しい卓の名前', t.name) || '').trim().slice(0, 20);
+    if (!name || name === t.name) return;
+    if (tables.some(x => x.name === name)) return toast(`「${name}」はすでにあります`);
+    try { await (await FBP).renameTable(t.id, name); toast('名前を変えました。QRコードはそのまま使えます。'); }
+    catch (er) { toast('変更できませんでした。通信状況を確認してください。'); }
+  }
+});
+
+async function gateGo(){
+  const v = $('#pw').value; if (!v) return;
+  const r = await (await FBP).login($('#em').value, v);
+  if (!r.ok) { $('#gateErr').hidden = false; $('#gateErr').textContent = r.code === 'login' ? 'メールアドレスかパスワードが違います。' : r.code === 'many' ? '何度も間違えたため一時的にログインできません。少し待ってから試してください。' : 'ログインできませんでした。通信状況を確認してください。'; }
+}
+$('#gateGo').addEventListener('click', gateGo);
+$('#pw').addEventListener('keydown', e => { if (e.key === 'Enter') gateGo(); });
+
+/* ===== GAS版・デモ(今までどおり) ===== */
+function makeOld(){
+  const base = $('#base').value.trim(), box = $('#cards'); box.textContent = '';
+  $('#tables').value.split('\n').map(s => s.trim()).filter(Boolean).forEach(t => box.append(card(t, base + '?t=' + encodeURIComponent(t))));
+}
+
+if (MODE === 'fb') {
+  $('#fbPanel').hidden = false; $('#baseFb').value = orderUrl;
+  let off = null;
+  FBP.then(fb => fb.watchStaff(u => {
+    if (u) {
+      $('#gate').hidden = true;
+      if (!off) off = fb.watchTables(list => { tables = list; renderTables(); },
+        code => toast(code === 'permission' ? 'このアカウントでは表示できません。firestore.rules を確認してください。' : '読み込めませんでした。通信状況を確認してください。'));
+    } else {
+      if (off) { off(); off = null; }
+      $('#gate').hidden = false; $('#em').focus();
+    }
+  })).catch(() => toast('読み込めませんでした。fb.js がGitHubにあるか確認してください。'));
+} else {
+  $('#oldPanel').hidden = false;
+  $('#base').value = orderUrl;
+  $('#tables').value = Array.from({ length:8 }, (_, i) => i + 1).join('\n');
+  $('#make').addEventListener('click', makeOld);
+  $('#print').addEventListener('click', () => print());
+  makeOld();
+}
 </script>
 </body>
 </html>
