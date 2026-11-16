@@ -10,6 +10,13 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@500;700;900&display=swap" rel="stylesheet">
 <script src="config.js"></script>
+<script>/* Firebase版なら、画面の準備と並行してFirebaseの部品を先に読み込み始める(表示を速くする) */
+(() => { const c = window.MO_CONFIG || {}; if (!(c.FIREBASE && c.FIREBASE.projectId)) return;
+  const add = (rel, href, cors) => { const l = document.createElement('link'); l.rel = rel; l.href = href; if (cors) l.crossOrigin = ''; document.head.appendChild(l); };
+  ['https://firestore.googleapis.com', 'https://identitytoolkit.googleapis.com', 'https://www.gstatic.com'].forEach(u => add('preconnect', u, true));
+  add('modulepreload', 'fb.js');
+  ['app', 'auth', 'firestore'].forEach(n => add('modulepreload', 'https://www.gstatic.com/firebasejs/13.3.0/firebase-' + n + '.js'));
+})();</script>
 <style>
 :root{
   --bg:#1d1c1a; --bar:#262422; --panel:#322f2c; --head:#3d3a35; --chip:#45413c; --line:#57524b; --field:#211f1d;
@@ -121,6 +128,9 @@ const CFG = Object.assign({ GAS_URL:'', FIREBASE:null, SHOP_NAME:'お店の名�
 const MODE = CFG.FIREBASE && CFG.FIREBASE.projectId ? 'fb' : CFG.GAS_URL ? 'gas' : 'demo';
 const DEMO = MODE === 'demo';
 const FBP = MODE === 'fb' ? import('./fb.js') : null;
+/* Firebase版を開けなかったときに原因を調べて表示する(ブラウザによってエラー文が違うため、fb.js の有無を直接確かめる) */
+const fbWhy = e => fetch('fb.js', { cache:'no-store' }).then(r => r.ok ? 'Firebaseの部品を読み込めませんでした(' + String((e && e.message) || e || '').slice(0, 120) + ')' : 'fb.js が見つかりません。GitHubにアップされているか確認してください。').catch(() => '通信できません。Wi-Fiを確認してください。');
+
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
 const yen = n => Number(n || 0).toLocaleString('ja-JP') + '円';
@@ -300,7 +310,7 @@ if (MODE === 'fb') {
       if (off) { off(); off = null; }
       $('#gateErr').hidden = true; $('#gate').hidden = false; $('#em').focus();
     }
-  })).catch(() => stat(false, '読み込めませんでした。ページを開き直してください'));
+  })).catch(async e => stat(false, '読み込めませんでした。' + await fbWhy(e)));
 } else if (DEMO || S.pass) poll(); else openGate('');
 </script>
 </body>
