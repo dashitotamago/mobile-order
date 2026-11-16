@@ -10,7 +10,7 @@ window.MO_CONFIG = {
     messagingSenderId: '965404320606',
     appId: '1:965404320606:web:7c98a8704eb30d31f1a5cf'
   },
-  SHOP_NAME: 'お店の名前',   // 画面上部とQRカードに表示する店名
+  SHOP_NAME: '出汁と卵 夜',   // 画面上部とQRカードに表示する店名
   ALLOW_NOTE: false,        // true にすると、お客様が商品ごとにメモ(例:氷なし)を書けます
   POLL_MS: 5000,            // 厨房画面の更新間隔(ミリ秒)
   WARN_MIN: 10,             // 注文からこの分数を過ぎると経過時間が黄色に
