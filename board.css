@@ -1,0 +1,101 @@
+/* 厨房画面(kitchen.html)とホール画面(hall.html)の共通スタイル */
+:root{
+  --bg:#1d1c1a; --bar:#262422; --panel:#322f2c; --head:#3d3a35; --chip:#45413c; --line:#57524b;
+  --text:#f6f2e9; --mute:#a59f93; --accent:#f6b400; --accent-ink:#221b00; --alert:#ff7a5c; --ok:#58c27d;
+  color-scheme:dark;
+}
+*{box-sizing:border-box;margin:0}
+body{font-family:"Zen Kaku Gothic New","Hiragino Sans","Noto Sans JP","Yu Gothic UI",sans-serif;font-weight:500;
+  background:var(--bg);color:var(--text);line-height:1.4;min-height:100dvh;-webkit-tap-highlight-color:transparent;
+  padding-bottom:calc(90px + env(safe-area-inset-bottom))}
+button{font:inherit;color:inherit;background:none;border:0;padding:0;cursor:pointer}
+button:disabled{opacity:.45;cursor:default}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+[hidden]{display:none!important}
+
+.bar{position:sticky;top:0;z-index:10;background:var(--bar);box-shadow:0 1px 0 #0008;padding-top:env(safe-area-inset-top)}
+.bar .row1{display:flex;align-items:center;flex-wrap:wrap;gap:6px 16px;padding:10px 16px 6px}
+.bar h1{font-size:18px;font-weight:900}
+.bar .count{font-size:15px;color:var(--mute)}
+.bar .count b{font-size:22px;font-weight:900;color:var(--accent);margin:0 3px}
+.stat{margin-left:auto;display:flex;align-items:center;gap:8px;font-size:13px;color:var(--mute)}
+.stat::before{content:"";width:10px;height:10px;border-radius:50%;background:var(--ok)}
+.stat.off{color:var(--alert);font-weight:700}
+.stat.off::before{background:var(--alert)}
+.tools{display:flex;align-items:center;gap:8px}
+.seg{display:flex;background:var(--chip);border-radius:10px;padding:3px}
+.seg button{min-height:38px;padding:0 14px;border-radius:8px;font-weight:700;font-size:14px;color:#d9d3c7}
+.seg button[aria-pressed=true]{background:var(--accent);color:var(--accent-ink)}
+.tbtn{min-height:44px;padding:0 16px;border-radius:10px;background:var(--chip);font-weight:700;font-size:14px}
+
+/* 絞り込み(カテゴリ・商品) */
+.filters{display:flex;gap:8px;overflow-x:auto;padding:4px 16px 10px;scrollbar-width:none}
+.filters::-webkit-scrollbar{display:none}
+.filters .sep{flex:none;width:1px;background:var(--line);margin:4px 2px}
+.chip{flex:none;min-height:40px;padding:0 14px;border-radius:999px;background:var(--chip);color:#d9d3c7;font-weight:700;font-size:14px;white-space:nowrap}
+.chip b{margin-left:6px;color:var(--accent)}
+.chip[aria-pressed=true]{background:var(--accent);color:var(--accent-ink)}
+.chip[aria-pressed=true] b{color:var(--accent-ink)}
+.chip.cat{border:1px solid var(--line)}
+.filternote{padding:0 16px 8px;font-size:13px;color:var(--accent);font-weight:700}
+
+.board{display:grid;grid-template-columns:repeat(auto-fill,minmax(310px,1fr));gap:14px;padding:14px;align-items:start}
+.tbl{background:var(--panel);border-radius:12px;overflow:hidden}
+.tbl>header{display:flex;align-items:baseline;gap:8px;padding:10px 14px;background:var(--head)}
+.tbl>header small{font-size:13px;color:var(--mute)}
+.tbl>header b{font-size:28px;font-weight:900;line-height:1.1}
+.tbl>header .tm{font-size:15px;font-weight:700;color:var(--text)}
+.tbl>header span{margin-left:auto;font-size:13px;color:var(--mute)}
+.line{display:flex;align-items:center;gap:10px;padding:10px 10px 10px 14px;border-top:1px solid #ffffff12}
+.what{flex:1;min-width:0}
+.nm{font-size:19px;font-weight:700}
+.q{margin-left:8px;font-size:17px;color:var(--mute);white-space:nowrap}
+.q.many{font-size:23px;font-weight:900;color:var(--accent)}
+.memo{display:block;font-size:14px;color:#ffcf99}
+.sub{display:block;font-size:12.5px;color:var(--mute)}
+.el{min-width:52px;text-align:right;font-size:13px;color:var(--mute)}
+.el.warn{color:var(--accent);font-weight:700}
+.el.late{color:var(--alert);font-weight:900}
+.done{flex:none;min-width:94px;min-height:54px;padding:0 12px;border-radius:10px;background:var(--accent);color:var(--accent-ink);font-weight:900;font-size:16px}
+.done:active{transform:scale(.97)}
+.line.call{background:#4f2a21}
+.line.call .nm{color:#ffd9cf}
+.line.call .done{background:var(--alert);color:#2a0c05}
+.line.new{animation:flash 1s ease-out 3}
+@keyframes flash{0%{box-shadow:inset 0 0 0 100px #f6b40055}100%{box-shadow:inset 0 0 0 100px #f6b40000}}
+.empty{grid-column:1/-1;padding:16vh 20px;text-align:center;color:var(--mute);font-size:16px}
+.empty b{display:block;font-size:22px;font-weight:900;color:var(--text);margin-bottom:8px}
+
+/* 卓の案内(ホール) */
+.sheet{position:fixed;inset:0;z-index:25;background:#000b;display:grid;place-items:end center}
+.sheet .in{width:min(760px,100%);max-height:88dvh;overflow-y:auto;background:var(--panel);border-radius:18px 18px 0 0;padding:18px 18px calc(18px + env(safe-area-inset-bottom))}
+.sheet h2{font-size:19px;font-weight:900;display:flex;align-items:center}
+.sheet h2 button{margin-left:auto;width:46px;height:46px;font-size:22px;color:var(--mute)}
+.sheet .lead{font-size:13px;color:var(--mute);margin:4px 0 14px}
+.tgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:10px}
+.tcell{display:grid;gap:4px;padding:14px;border-radius:12px;text-align:left;background:var(--bg);border:2px solid var(--line)}
+.tcell b{font-size:24px;font-weight:900;line-height:1.1}
+.tcell span{font-size:13px;color:var(--mute)}
+.tcell em{font-style:normal;font-size:14px;font-weight:900;color:var(--accent)}
+.tcell.open{border-color:var(--ok)}
+.tcell.open span{color:var(--ok);font-weight:700}
+.tcell.open em{color:#d9d3c7;font-weight:700}
+.tcell.armed{border-color:var(--alert)}
+.tcell.armed em{color:var(--alert)}
+
+.snack{position:fixed;left:50%;bottom:calc(18px + env(safe-area-inset-bottom));z-index:30;transform:translate(-50%,160%);
+  display:flex;align-items:center;gap:14px;max-width:92vw;padding:10px 10px 10px 20px;border-radius:14px;
+  background:#f6f2e9;color:#231f1a;font-weight:700;font-size:15px;box-shadow:0 8px 24px #000a;transition:transform .2s}
+.snack.on{transform:translate(-50%,0)}
+.snack button{flex:none;min-height:46px;padding:0 18px;border-radius:10px;background:#231f1a;color:#f6f2e9;font-weight:900}
+
+.gate{position:fixed;inset:0;z-index:40;display:grid;place-content:center;justify-items:center;gap:14px;padding:24px;
+  background:#1d1c1af2;text-align:center}
+.gate h2{font-size:24px;font-weight:900}
+.gate p{color:var(--mute);font-size:15px;max-width:26em}
+.login{display:grid;gap:10px;width:min(340px,86vw);margin-top:6px}
+.login input{font:inherit;font-size:16px;color:var(--text);background:#211f1d;border:1px solid #57524b;border-radius:10px;padding:13px}
+.lgerr{color:var(--alert);font-weight:700;font-size:14px}
+.gate .go{margin-top:8px;padding:18px 44px;border-radius:14px;background:var(--accent);color:var(--accent-ink);font-weight:900;font-size:19px}
+@media (max-width:560px){.bar .row1{padding:10px 12px 6px}.filters{padding:4px 12px 10px}.board{padding:10px;gap:10px}}
+@media (prefers-reduced-motion:reduce){.line.new{animation:none}.snack{transition:none}}
