@@ -95,6 +95,46 @@ input{font:inherit;font-size:16px;color:var(--text);background:var(--field);bord
   background:#f6f2e9;color:#231f1a;font-weight:700;font-size:15px;box-shadow:0 8px 24px #000a;transition:transform .2s}
 .snack.on{transform:translate(-50%,0)}
 .snack button{flex:none;min-height:46px;padding:0 18px;border-radius:10px;background:#231f1a;color:#f6f2e9;font-weight:900}
+.addbtn{min-height:46px;padding:0 18px;border-radius:10px;background:var(--accent);color:var(--accent-ink);font-weight:900;font-size:15px}
+.dbtns{display:flex;gap:10px;padding:14px 18px 0}
+.dbtns button{flex:1;min-height:48px;border-radius:10px;background:var(--chip);font-weight:700;font-size:15px}
+
+/* 注文・席料の入力 */
+.entry{position:fixed;inset:0;z-index:35;background:var(--bg);display:flex;flex-direction:column}
+.entry>header{display:flex;align-items:center;gap:12px;padding:calc(10px + env(safe-area-inset-top)) 10px 10px 18px;background:var(--bar);box-shadow:0 1px 0 #0008}
+.entry>header h2{font-size:18px;font-weight:900}
+.entry .body{flex:1;overflow-y:auto;padding:14px 18px 20px}
+.entry h3{font-size:14px;font-weight:700;color:var(--mute);margin:14px 0 8px}
+.entry h3:first-child{margin-top:0}
+.chips{display:flex;flex-wrap:wrap;gap:8px}
+.chip{min-height:44px;padding:0 16px;border-radius:999px;background:var(--chip);color:#d9d3c7;font-weight:700;font-size:15px}
+.chip small{margin-left:6px;font-size:11px;font-weight:700;color:var(--mute)}
+.chip[aria-pressed=true]{background:var(--accent);color:var(--accent-ink)}
+.chip[aria-pressed=true] small{color:var(--accent-ink)}
+.tabs{display:flex;background:var(--chip);border-radius:10px;padding:3px;margin-top:18px;width:max-content}
+.tabs button{min-height:40px;padding:0 18px;border-radius:8px;font-weight:700;font-size:15px;color:#d9d3c7}
+.tabs button[aria-pressed=true]{background:var(--accent);color:var(--accent-ink)}
+.menu{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px}
+.mi{position:relative;display:grid;gap:2px;min-height:64px;padding:10px 12px;border-radius:10px;background:var(--panel);text-align:left}
+.mi b{font-size:15px;font-weight:700;line-height:1.3}
+.mi span{font-size:13px;color:var(--mute)}
+.mi i{position:absolute;top:6px;right:6px;min-width:26px;height:26px;padding:0 7px;border-radius:13px;display:grid;place-items:center;background:var(--accent);color:var(--accent-ink);font-style:normal;font-weight:900;font-size:14px}
+.mi.sold span{color:var(--alert)}
+.seat{display:grid;gap:14px;max-width:420px;margin-top:16px}
+.seat label{display:flex;align-items:center;justify-content:space-between;gap:12px;font-size:15px;font-weight:700}
+.seat input{width:120px;text-align:right}
+.stepper{display:flex;align-items:center;gap:6px}
+.stepper button{width:46px;height:46px;border-radius:50%;background:var(--chip);font-size:22px;font-weight:700;line-height:1}
+.stepper output{min-width:40px;text-align:center;font-weight:900;font-size:20px}
+.seatsum{font-size:14px;color:var(--mute)}
+.picked{margin-top:18px;border-top:1px solid var(--line)}
+.picked .row{align-items:center}
+.picked .row .stepper button{width:40px;height:40px;font-size:20px}
+.entry>footer{display:flex;align-items:center;gap:14px;padding:12px 18px calc(12px + env(safe-area-inset-bottom));background:var(--bar);box-shadow:0 -1px 0 #0008}
+.entry>footer p{flex:1;font-size:14px;color:var(--mute)}
+.entry>footer p b{font-size:20px;color:var(--text);margin-left:4px}
+.entry>footer .addbtn{min-height:54px;padding:0 26px;font-size:17px}
+.entry .err{margin-top:12px;padding:10px 12px;border-radius:8px;background:#4f2a21;color:#ffd9cf;font-size:14px;font-weight:700}
 @media (prefers-reduced-motion:reduce){.snack{transition:none}}
 </style>
 </head>
@@ -103,6 +143,7 @@ input{font:inherit;font-size:16px;color:var(--text);background:var(--field);bord
 <header class="bar">
   <h1 id="shopName"></h1>
   <p class="count">未会計<b id="nTables">0</b>卓 / 合計<b id="nSum">0円</b></p>
+  <button class="addbtn" id="entryBtn" hidden>＋ 注文・席料を入力</button>
   <p class="stat" id="stat">接続中…</p>
 </header>
 
@@ -118,6 +159,30 @@ input{font:inherit;font-size:16px;color:var(--text);background:var(--field);bord
   <input type="password" id="pw" autocomplete="current-password" placeholder="パスワード" aria-label="パスワード">
   <p class="err" id="gateErr" hidden></p>
   <button class="primary" id="gateGo">ログイン</button>
+</div>
+
+<div class="entry" id="entry" hidden role="dialog" aria-modal="true" aria-labelledby="entryTitle">
+  <header><h2 id="entryTitle">注文・席料を入力</h2><button class="x" data-eclose aria-label="閉じる">✕</button></header>
+  <div class="body">
+    <h3>卓</h3>
+    <div class="chips" id="eTables"></div>
+    <div class="tabs" id="eTabs" role="group" aria-label="入力するもの"><button data-tab="menu" aria-pressed="true">料理・ドリンク</button><button data-tab="seat" aria-pressed="false">席料</button></div>
+    <div id="eMenuWrap">
+      <h3>カテゴリ</h3>
+      <div class="chips" id="eCats"></div>
+      <h3>商品(押した回数だけ追加されます)</h3>
+      <div class="menu" id="eMenu"></div>
+    </div>
+    <div class="seat" id="eSeat" hidden>
+      <label>人数<span class="stepper"><button data-seat="-1" aria-label="減らす">−</button><output id="eSeatN">1</output><button data-seat="1" aria-label="増やす">＋</button></span></label>
+      <label>1人あたり(税抜)<span><input id="eSeatPrice" inputmode="numeric" aria-label="席料の単価"> 円</span></label>
+      <p class="seatsum" id="eSeatSum"></p>
+      <label style="justify-content:flex-start;font-weight:500;font-size:14px"><input type="checkbox" id="eSeatOn" style="width:20px;height:20px;accent-color:var(--accent)"> 席料をこの注文に含める</label>
+    </div>
+    <div class="picked" id="ePicked"></div>
+    <p class="err" id="eErr" hidden></p>
+  </div>
+  <footer><p id="eSummary"></p><button class="addbtn" id="eSend" disabled>追加する</button></footer>
 </div>
 
 <div class="snack" id="snack" role="status"><span id="snackText"></span><button id="snackBtn" hidden>取り消す</button></div>
@@ -164,8 +229,9 @@ async function call(action, extra = {}){
       /* 会計済にすると同時に、その卓の来店の区切りを新しくする(QRコードがリセットされ、次のお客様は0円から始まる) */
       const t = S.tables.find(x => x.table === extra.table), ids = t.lines.map(l => l.lineId);
       const last = new Map(); t.lines.filter(l => l.tableId).sort((a, b) => a.at - b.at).forEach(l => last.set(l.tableId, l.session));
-      const before = [...last].map(([id, session]) => ({ id, session }));
-      const r = await fb.setPaid(ids, true, before.map(x => ({ id:x.id, session:fb.newSession() })));
+      const before = [...last].map(([id, session]) => ({ id, session, open:true }));
+      /* 会計済:卓を空席にして新しい区切りにする(ホールが案内するまで、どの端末からも注文できない) */
+      const r = await fb.setPaid(ids, true, before.map(x => ({ id:x.id, session:fb.newSession(), open:false })));
       return { ok:true, stamp:r.payId, ids, before };
     }
     if (action === 'unpay') { await fb.setPaid(extra.ids, false, extra.before || []); return { ok:true }; }
@@ -244,13 +310,14 @@ function render(){
   const waiting = t.lines.filter(l => !l.served).reduce((a, l) => a + l.qty, 0);
   d.innerHTML = `<header><small>卓</small><b>${esc(t.table)}</b><span>${hm(Math.min(...t.lines.map(l => l.at)))}〜 / ${count(t)}品</span>
       <button class="x" data-close aria-label="閉じる">✕</button></header>
+    ${MODE === 'fb' ? `<div class="dbtns"><button data-add="menu">＋ 注文を追加</button><button data-add="seat">＋ 席料を追加</button></div>` : ''}
     <div class="lines">${[...agg.values()].map(a => `<div class="row"><span class="nm">${esc(a.name)}<small>${TAX_PM ? '税抜 ' : ''}${yen(a.price)}</small></span>
       <span class="q${a.qty > 1 ? ' many' : ''}">×${a.qty}</span><span class="amt">${yen(a.price * a.qty)}</span></div>`).join('')}</div>
     ${TAX_PM ? `<div class="sumrow first"><span>小計(税抜)</span><span>${yen(t.total)}</span></div><div class="sumrow"><span>消費税(${TAX_PM / 10}%)</span><span>${yen(taxOf(t.total))}</span></div>` : ''}
     <div class="total"><span>お会計金額${TAX_PM ? '(税込)' : ''}</span><b>${yen(incl(t.total))}</b></div>
     ${waiting ? `<p class="warn">まだ提供していない商品が${waiting}品あります。</p>` : ''}
     <button class="pay" data-pay${S.paying ? ' disabled' : ''}>${S.paying ? '処理中…' : '会計済にする'}</button>
-    <p class="hint">会計済にすると、この卓の注文履歴と金額が0に戻り、卓のQRコードもリセットされます(前のお客様のスマホからは注文できなくなります)。お会計のたびに押してください。</p>`;
+    <p class="hint">会計済にすると、この卓の注文履歴と金額が0に戻り、卓は空席になります。次のお客様はホール画面で「案内」を押すまで注文できません。お会計のたびに押してください。</p>`;
 }
 $('#tables').addEventListener('click', e => {
   const b = e.target.closest('[data-table]'); if (!b) return;
@@ -259,7 +326,78 @@ $('#tables').addEventListener('click', e => {
 $('#detail').addEventListener('click', e => {
   if (e.target.closest('[data-close]')) { S.sel = null; render(); }
   else if (e.target.closest('[data-pay]')) pay();
+  else if (e.target.closest('[data-add]')) { const t = S.tables.find(x => x.table === S.sel); openEntry(t && t.lines.find(l => l.tableId)?.tableId, e.target.closest('[data-add]').dataset.add); }
 });
+
+/* ===== 注文・席料の入力(Firebase版) ===== */
+const E = { tables:[], menu:[], tableId:null, tab:'menu', cat:null, cart:new Map(), seatN:1, seatPrice:'', seatOn:false, sending:false };
+const SEAT_KEY = 'mo_seat_price';
+function openEntry(tableId, tab){
+  E.tableId = tableId || null; E.tab = tab || 'menu'; E.cart = new Map(); E.seatN = 1; E.seatOn = tab === 'seat';
+  E.seatPrice = String(E.settingsPrice ?? store.get(SEAT_KEY, CFG.SEAT_FEE ?? ''));
+  $('#eSeatPrice').value = E.seatPrice; $('#eErr').hidden = true;
+  $('#entry').hidden = false; document.body.style.overflow = 'hidden'; renderEntry();
+}
+function closeEntry(){ $('#entry').hidden = true; document.body.style.overflow = ''; }
+const eItems = () => [...E.cart].map(([id, qty]) => ({ m:E.menu.find(m => m.id === id), qty })).filter(x => x.m);
+function renderEntry(){
+  $('#eTables').innerHTML = E.tables.length ? E.tables.map(t => `<button class="chip" data-etable="${esc(t.id)}" aria-pressed="${t.id === E.tableId}">${esc(t.name)}<small>${t.open ? '利用中' : '空席'}</small></button>`).join('')
+    : '<p class="seatsum">卓がまだ登録されていません。QRコード作成ページで卓を追加してください。</p>';
+  document.querySelectorAll('#eTabs button').forEach(b => b.setAttribute('aria-pressed', b.dataset.tab === E.tab));
+  $('#eMenuWrap').hidden = E.tab !== 'menu'; $('#eSeat').hidden = E.tab !== 'seat';
+  const cats = [...new Set(E.menu.map(m => m.cat || 'その他'))];
+  if (!E.cat || !cats.includes(E.cat)) E.cat = cats[0] || null;
+  $('#eCats').innerHTML = cats.map(c => `<button class="chip" data-ecat="${esc(c)}" aria-pressed="${c === E.cat}">${esc(c)}</button>`).join('');
+  $('#eMenu').innerHTML = E.menu.filter(m => (m.cat || 'その他') === E.cat).map(m => `<button class="mi${m.sold ? ' sold' : ''}" data-eitem="${esc(m.id)}">
+      <b>${esc(m.name)}</b><span>${yen(m.price)}${m.sold ? ' ・ 売り切れ' : ''}</span>${E.cart.get(m.id) ? `<i>${E.cart.get(m.id)}</i>` : ''}</button>`).join('')
+    || '<p class="seatsum">メニューがありません。</p>';
+  $('#eSeatN').textContent = E.seatN;
+  $('#eSeatOn').checked = E.seatOn;
+  const price = Number(E.seatPrice) || 0;
+  $('#eSeatSum').textContent = `席料 ${yen(price)} × ${E.seatN}人 = ${yen(price * E.seatN)}(税抜)`;
+  const its = eItems();
+  const seatRow = E.seatOn ? `<div class="row"><span class="nm">席料<small>${yen(price)} × ${E.seatN}人</small></span><span class="amt">${yen(price * E.seatN)}</span></div>` : '';
+  $('#ePicked').innerHTML = its.length || E.seatOn ? its.map(x => `<div class="row"><span class="nm">${esc(x.m.name)}<small>${yen(x.m.price)}</small></span>
+      <span class="stepper"><button data-eq="${esc(x.m.id)}" data-d="-1" aria-label="減らす">−</button><output>${x.qty}</output><button data-eq="${esc(x.m.id)}" data-d="1" aria-label="増やす">＋</button></span>
+      <span class="amt">${yen(x.m.price * x.qty)}</span></div>`).join('') + seatRow : '';
+  const n = its.reduce((a, x) => a + x.qty, 0), sum = its.reduce((a, x) => a + x.m.price * x.qty, 0) + (E.seatOn ? price * E.seatN : 0);
+  const t = E.tables.find(x => x.id === E.tableId);
+  $('#eSummary').innerHTML = t ? `卓 ${esc(t.name)} ・ ${n}品${E.seatOn ? '+席料' : ''}<b>${yen(sum)}</b>` : '卓を選んでください';
+  $('#eSend').disabled = E.sending || !t || (!n && !E.seatOn) || (E.seatOn && !(price >= 0 && String(E.seatPrice).trim() !== ''));
+  $('#eSend').textContent = E.sending ? '送信中…' : n ? '厨房に送る' : '席料を追加する';
+}
+$('#entry').addEventListener('click', e => {
+  const g = (sel) => e.target.closest(sel);
+  if (g('[data-eclose]')) return closeEntry();
+  if (g('[data-etable]')) E.tableId = g('[data-etable]').dataset.etable;
+  else if (g('[data-tab]')) { E.tab = g('[data-tab]').dataset.tab; if (E.tab === 'seat') E.seatOn = true; }
+  else if (g('[data-ecat]')) E.cat = g('[data-ecat]').dataset.ecat;
+  else if (g('[data-eitem]')) { const id = g('[data-eitem]').dataset.eitem; E.cart.set(id, Math.min((E.cart.get(id) || 0) + 1, 99)); }
+  else if (g('[data-eq]')) { const b = g('[data-eq]'), q = (E.cart.get(b.dataset.eq) || 0) + Number(b.dataset.d); if (q > 0) E.cart.set(b.dataset.eq, Math.min(q, 99)); else E.cart.delete(b.dataset.eq); }
+  else if (g('[data-seat]')) E.seatN = Math.max(1, Math.min(99, E.seatN + Number(g('[data-seat]').dataset.seat)));
+  else return;
+  renderEntry();
+});
+$('#eSeatPrice').addEventListener('input', e => { E.seatPrice = e.target.value.replace(/[０-９]/g, d => '０１２３４５６７８９'.indexOf(d)).replace(/[^\d]/g, ''); e.target.value = E.seatPrice; renderEntry(); });
+$('#eSeatOn').addEventListener('change', e => { E.seatOn = e.target.checked; renderEntry(); });
+$('#entryBtn').addEventListener('click', () => openEntry(S.sel ? S.tables.find(x => x.table === S.sel)?.lines.find(l => l.tableId)?.tableId : null, 'menu'));
+$('#eSend').addEventListener('click', async () => {
+  if (E.sending) return;
+  const fb = await FBP, t = E.tables.find(x => x.id === E.tableId), price = Number(E.seatPrice) || 0;
+  E.sending = true; $('#eErr').hidden = true; renderEntry();
+  try {
+    const r = await fb.staffOrder({ tableId:E.tableId, items:eItems().map(x => ({ id:x.m.id, qty:x.qty })), seat:E.seatOn ? { qty:E.seatN, price } : null, menu:E.menu });
+    if (!r.ok) throw new Error(r.error);
+    if (E.seatOn && price !== E.settingsPrice) { E.settingsPrice = price; store.set(SEAT_KEY, price); fb.saveSettings({ seatFee:price }).catch(() => {}); }   /* 席料の単価を次回のために覚える */
+    E.sending = false; closeEntry();
+    S.sel = r.table; S.sig = null; render();
+    snack(`卓${r.table}に追加しました${r.opened ? '(空席だったので利用中にしました)' : ''}`);
+  } catch (er) {
+    E.sending = false; renderEntry();
+    $('#eErr').hidden = false; $('#eErr').textContent = er && er.message && !/^[a-z-]+$/.test(er.message) ? er.message : '送信できませんでした。通信状況を確認して、もう一度押してください。';
+  }
+});
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && !$('#entry').hidden) closeEntry(); });
 
 /* ===== 会計済 / 取り消し ===== */
 async function pay(){
@@ -311,6 +449,12 @@ if (MODE === 'fb') {
   FBP.then(fb => fb.watchStaff(u => {
     if (u) {
       $('#gate').hidden = true;
+      if (!off) {
+        $('#entryBtn').hidden = false;
+        fb.watchTables(list => { E.tables = list; if (!$('#entry').hidden) renderEntry(); });
+        fb.watchMenu(list => { E.menu = list.filter(m => !m.hidden); if (!$('#entry').hidden) renderEntry(); });
+        fb.getSettings().then(st => { if (st.seatFee != null) E.settingsPrice = Number(st.seatFee); });
+      }
       if (!off) off = fb.watchUnpaid((lines, cached) => { applyLines(lines); cached ? stat(false, '通信できません。Wi-Fiを確認してください(最後に届いた内容を表示中)') : stat(true, 'リアルタイム受信中'); },
         code => stat(false, code === 'permission' ? 'このアカウントでは表示できません。設定を確認してください' : '通信できません。Wi-Fiを確認してください'));
     } else {
