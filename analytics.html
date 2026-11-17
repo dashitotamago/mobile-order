@@ -116,6 +116,15 @@ td.rk{color:var(--mute);width:2.5em}
 .minibar{display:inline-block;width:calc(var(--w) * 80px);height:8px;background:var(--series);border-radius:0 3px 3px 0;vertical-align:middle;margin-right:8px;min-width:2px}
 .abc{display:inline-grid;place-items:center;width:24px;height:24px;border-radius:6px;font-weight:900;font-size:13px;background:var(--chip);color:var(--sub)}
 .abc.A{background:var(--text);color:#231f1a}
+.thead{display:flex;align-items:center;flex-wrap:wrap;gap:8px 14px}
+.target{margin-left:auto;display:flex;align-items:center;gap:8px;font-size:14px;color:var(--sub)}
+.target select{font:inherit;font-size:16px;color:var(--text);background:var(--field);border:1px solid var(--line);border-radius:8px;padding:6px 10px}
+.ttiles{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+.ttile{background:var(--bg);border-radius:10px;padding:12px 14px}
+.ttile p{font-size:13px;color:var(--mute)}
+.ttile b{display:block;font-size:26px;font-weight:900;line-height:1.2;margin-top:4px}
+.ttile small{display:block;font-size:12px;color:var(--mute);margin-top:2px}
+@media (max-width:820px){.ttiles{grid-template-columns:repeat(2,minmax(0,1fr))}}
 .zero{display:flex;flex-wrap:wrap;gap:8px}
 .zero span{padding:5px 12px;border-radius:999px;background:var(--chip);font-size:13px;color:var(--sub)}
 
@@ -196,6 +205,27 @@ td.rk{color:var(--mute);width:2.5em}
     <div class="body tblwrap" id="rank"></div>
   </section>
 
+  <section class="card" id="timeCard">
+    <div class="thead"><h2>提供時間</h2>
+      <label class="target">目標
+        <select id="target" aria-label="提供時間の目標(分)"></select>分以内</label></div>
+    <p class="note" id="timeNote"></p>
+    <div class="body" id="times"></div>
+  </section>
+
+  <div class="grid2">
+    <section class="card">
+      <h2>商品別の提供時間</h2>
+      <p class="note">注文から提供までの平均が長い順</p>
+      <div class="body tblwrap" id="timeItems"></div>
+    </section>
+    <section class="card">
+      <h2>時間帯別の提供時間</h2>
+      <p class="note">注文から提供までの平均(分)</p>
+      <div class="body" id="timeHours"></div>
+    </section>
+  </div>
+
   <section class="card" id="dayCard">
     <h2 id="dayTitle">日別の推移</h2>
     <div class="body" id="days"></div>
@@ -221,7 +251,7 @@ td.rk{color:var(--mute);width:2.5em}
 
 <script>
 /* ===== 設定(config.js で上書き) ===== */
-const CFG = Object.assign({ GAS_URL:'', FIREBASE:null, SHOP_NAME:'お店の名前', TAX_RATE:0.10, TAX_ROUND:'floor', DAY_START_HOUR:4 }, window.MO_CONFIG || {});
+const CFG = Object.assign({ GAS_URL:'', FIREBASE:null, SHOP_NAME:'お店の名前', TAX_RATE:0.10, TAX_ROUND:'floor', DAY_START_HOUR:4, LATE_MIN:20 }, window.MO_CONFIG || {});
 const MODE = CFG.FIREBASE && CFG.FIREBASE.projectId ? 'fb' : 'demo';
 const FBP = MODE === 'fb' ? import('./fb.js') : null;
 const DAY0 = Math.min(Math.max(Number(CFG.DAY_START_HOUR) || 0, 0), 12);   /* 営業日の区切り(この時刻より前は前日扱い) */
@@ -262,14 +292,14 @@ function rangeOf(key){
 }
 
 /* ===== 状態 ===== */
-const S = { period:'month', group:'all', metric:'qty', menu:[], lines:[], range:null, cache:new Map(), loading:false, sortKey:null };
+const S = { period:'month', group:'all', metric:'qty', late:Number(CFG.LATE_MIN) || 20, menu:[], lines:[], range:null, cache:new Map(), loading:false, sortKey:null };
 const mem = {};
 const store = {
   get(k, d){ try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch (e) { return k in mem ? mem[k] : d; } },
   set(k, v){ mem[k] = v; try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
 };
-(() => { const p = store.get('mo_an_prefs', null); if (p) { S.period = p.period || S.period; S.metric = p.metric || S.metric; } })();
-const savePrefs = () => store.set('mo_an_prefs', { period:S.period, metric:S.metric });
+(() => { const p = store.get('mo_an_prefs', null); if (p) { S.period = p.period || S.period; S.metric = p.metric || S.metric; S.late = Number(p.late) || S.late; } })();
+const savePrefs = () => store.set('mo_an_prefs', { period:S.period, metric:S.metric, late:S.late });
 
 /* ===== デモ用データ(Firebase未設定のとき) ===== */
 const DEMO_MENU = [
@@ -298,7 +328,9 @@ function demoLines(from, to){
       for (let i = 0; i < n; i++) {
         const id = pick(), m = DEMO_MENU.find(x => x.id === id), at = base.getTime() + i * 9 * 60000;
         if (at >= Date.now()) continue;
-        out.push({ id, name:m.name, price:m.price, qty:1 + (rnd() < .2 ? 1 : 0), at, paid:true, payId:pay, table:String(1 + g % 8) });
+        const drink = m.group === 'ドリンク', busy = [12, 19, 20].includes(new Date(at).getHours()) ? 1.5 : 1;
+        const cookedAt = at + Math.round((drink ? 1.5 + rnd() * 3 : 5 + rnd() * 12) * busy * 60000), servedAt = cookedAt + Math.round((0.5 + rnd() * 4) * 60000);
+        out.push({ id, name:m.name, price:m.price, qty:1 + (rnd() < .2 ? 1 : 0), at, cookedAt, servedAt, paid:true, payId:pay, table:String(1 + g % 8) });
       }
     }
   }
@@ -336,7 +368,11 @@ async function load(force){
 function aggregate(){
   const info = new Map(S.menu.map(m => [String(m.id), m]));
   const meta = l => { const m = info.get(String(l.id)); return m ? { group:m.group || '', cat:m.cat || 'その他', name:m.name } : { group:'', cat:'(メニューにない商品)', name:l.name }; };
-  const lines = S.lines.map(l => ({ ...l, ...meta(l), sales:(Number(l.price) || 0) * (Number(l.qty) || 0) }))
+  /* 席料は商品の分析には含めず、売上・組単価にだけ含める(区分で絞り込んだときは含めない) */
+  const amt = l => (Number(l.price) || 0) * (Number(l.qty) || 0);
+  const seats = S.group === 'all' ? S.lines.filter(l => l.seat) : [];
+  const seatSales = seats.reduce((a, l) => a + amt(l), 0);
+  const lines = S.lines.filter(l => !l.seat).map(l => ({ ...l, ...meta(l), sales:amt(l) }))
     .filter(l => S.group === 'all' || l.group === S.group);
   const items = new Map(), cats = new Map(), groups = new Map();
   const add = (map, k, l, extra) => { const x = map.get(k) || { key:k, qty:0, sales:0, ...extra }; x.qty += l.qty; x.sales += l.sales; map.set(k, x); };
@@ -346,8 +382,9 @@ function aggregate(){
     add(groups, l.group || 'その他', l, {});
   });
   const tot = { qty:lines.reduce((a, l) => a + l.qty, 0), sales:lines.reduce((a, l) => a + l.sales, 0) };
-  const pays = new Set(lines.filter(l => l.paid && l.payId).map(l => l.payId));
-  const paidSales = lines.filter(l => l.paid && l.payId).reduce((a, l) => a + l.sales, 0);
+  const paidAll = [...lines, ...seats.map(l => ({ ...l, sales:amt(l) }))].filter(l => l.paid && l.payId);
+  const pays = new Set(paidAll.map(l => l.payId));
+  const paidSales = paidAll.reduce((a, l) => a + l.sales, 0);
   /* ABC(売上の多い順に累計) */
   let cum = 0;
   [...items.values()].sort((a, b) => b.sales - a.sales).forEach(it => {
@@ -375,7 +412,21 @@ function aggregate(){
   const sold = new Set(items.keys());
   const zero = S.menu.filter(m => !m.hidden && !sold.has(String(m.id)) && (S.group === 'all' || m.group === S.group));
   const groupOrder = [...new Set(S.menu.map(m => m.group || 'その他'))];
-  return { tot, pays:pays.size, paidSales, items:[...items.values()], cats:[...cats.values()], groups, groupOrder, hours, days, spanDays, zero };
+  /* 提供時間(分)。調理済・提供済の時刻が記録されている商品だけで計算する */
+  const dur = (a, b) => a && b && b >= a ? (b - a) / 60000 : null;
+  const tl = lines.map(l => ({ l, c:dur(l.at, l.cookedAt), s:dur(l.cookedAt, l.servedAt), t:dur(l.at, l.servedAt) }));
+  const stat = arr => { const v = arr.filter(x => x !== null).sort((a, b) => a - b); if (!v.length) return null;
+    return { n:v.length, avg:v.reduce((a, x) => a + x, 0) / v.length, med:v.length % 2 ? v[(v.length - 1) / 2] : (v[v.length / 2 - 1] + v[v.length / 2]) / 2 }; };
+  const late = S.late, totals = tl.filter(x => x.t !== null);
+  const time = { c:stat(tl.map(x => x.c)), s:stat(tl.map(x => x.s)), t:stat(tl.map(x => x.t)), late,
+    within:totals.length ? totals.filter(x => x.t <= late).length / totals.length : null };
+  const byItem = new Map();
+  tl.forEach(x => { const k = String(x.l.id); const o = byItem.get(k) || { name:x.l.name, c:[], s:[], t:[] }; o.c.push(x.c); o.s.push(x.s); o.t.push(x.t); byItem.set(k, o); });
+  time.items = [...byItem.values()].map(o => ({ name:o.name, c:stat(o.c), s:stat(o.s), t:stat(o.t) })).filter(o => o.t || o.c).sort((a, b) => ((b.t || b.c).avg) - ((a.t || a.c).avg));
+  const hb = Array.from({ length:24 }, (_, i) => ({ h:(DAY0 + i) % 24, v:[] }));
+  totals.forEach(x => hb[(new Date(x.l.at).getHours() - DAY0 + 24) % 24].v.push(x.t));
+  time.hours = hb.map(x => ({ h:x.h, avg:x.v.length ? x.v.reduce((a, y) => a + y, 0) / x.v.length : 0, n:x.v.length }));
+  return { tot, seatSales, pays:pays.size, paidSales, items:[...items.values()], cats:[...cats.values()], groups, groupOrder, hours, days, spanDays, zero, time };
 }
 
 /* ===== 描画 ===== */
@@ -402,7 +453,7 @@ function render(){
   /* 合計 */
   const unit = A.pays ? Math.round(A.paidSales / A.pays) : 0;
   $('#kpis').innerHTML = `
-    <div class="kpi"><p>売上(税抜)</p><b>${yen(A.tot.sales)}</b>${TAX_PM ? `<small>税込の目安 ${yen(A.tot.sales + TAX_RND(A.tot.sales * TAX_PM / 1000))}</small>` : ''}</div>
+    <div class="kpi"><p>売上(税抜)</p><b>${yen(A.tot.sales + A.seatSales)}</b>${A.seatSales ? `<small>うち席料 ${yen(A.seatSales)}</small>` : ''}${TAX_PM ? `<small>税込の目安 ${yen(A.tot.sales + A.seatSales + TAX_RND((A.tot.sales + A.seatSales) * TAX_PM / 1000))}</small>` : ''}</div>
     <div class="kpi"><p>出数</p><b>${n0(A.tot.qty)}</b><small>${A.items.length}品目</small></div>
     <div class="kpi"><p>会計組数</p><b>${n0(A.pays)}</b><small>会計済の組</small></div>
     <div class="kpi"><p>組単価(税抜)</p><b>${A.pays ? yen(unit) : '-'}</b><small>会計済の組の平均</small></div>`;
@@ -456,6 +507,22 @@ function render(){
   $('#dayTitle').textContent = (A.spanDays > 62 ? '月別の推移' : '日別の推移') + `(${metricName()})`;
   if (!$('#dayCard').hidden) $('#days').innerHTML = columns(A.days.map(d => ({ label:d.label, full:d.full, v:d[S.metric] })), 'day');
 
+  /* 提供時間 */
+  const tm = A.time, mn = v => v === null || v === undefined ? '-' : v < 10 ? v.toFixed(1) + '分' : Math.round(v) + '分';
+  $('#timeNote').textContent = tm.t || tm.c ? `厨房の「調理済」、ホールの「提供済」を押した時刻から計算しています(${n0((tm.t || tm.c).n)}品分)。中央値は、ばらつきに左右されにくい真ん中の値です。` : '';
+  const tile = (label, st, extra) => `<div class="ttile"><p>${label}</p><b class="num">${st ? mn(st.avg) : '-'}</b><small>${st ? '中央値 ' + mn(st.med) : '記録なし'}${extra || ''}</small></div>`;
+  $('#times').innerHTML = tm.t || tm.c ? `<div class="ttiles">
+      ${tile('注文 → 調理済(平均)', tm.c)}${tile('調理済 → 提供(平均)', tm.s)}${tile('注文 → 提供(平均)', tm.t)}
+      <div class="ttile"><p>目標(${tm.late}分以内)に提供</p><b class="num">${tm.within === null ? '-' : (tm.within * 100).toFixed(0) + '%'}</b><small>注文から提供までが${tm.late}分以内の割合</small></div></div>`
+    : '<p class="empty">この期間は提供時間の記録がありません。厨房画面の「調理済」とホール画面の「提供済」を押すと記録されます。</p>';
+  $('#timeItems').innerHTML = tm.items.length ? `<table><thead><tr><th class="l">商品</th><th>件数</th><th>注文→調理済</th><th>調理済→提供</th><th>注文→提供</th></tr></thead>
+      <tbody>${tm.items.map(o => `<tr><td class="l nm" title="${esc(o.name)}">${esc(o.name)}</td><td class="num">${n0((o.t || o.c).n)}</td>
+        <td class="num">${mn(o.c && o.c.avg)}</td><td class="num">${mn(o.s && o.s.avg)}</td><td class="num">${mn(o.t && o.t.avg)}</td></tr>`).join('')}</tbody></table>`
+    : '<p class="empty">記録がありません。</p>';
+  const th = tm.hours, f1 = th.findIndex(x => x.n), l1 = th.length - 1 - [...th].reverse().findIndex(x => x.n);
+  $('#timeHours').innerHTML = f1 < 0 ? '<p class="empty">記録がありません。</p>'
+    : columns(th.slice(f1, l1 + 1).map(x => ({ label:x.h + '時', full:x.h + '時台の注文(' + x.n + '品)', v:Math.round(x.avg * 10) / 10 })), 'hour', v => v ? v.toFixed(1) + '分' : '-', v => Math.round(v) + '分', '注文→提供の平均');
+
   /* 出ていない商品 */
   $('#zeroCard').hidden = !A.zero.length;
   $('#zero').innerHTML = `<div class="zero">${A.zero.map(m => `<span>${esc(m.name)}</span>`).join('')}</div>`;
@@ -464,16 +531,16 @@ function render(){
 /* 縦棒グラフ(1系列)。値は目盛り・ツールチップ・表で読める */
 function niceMax(v){ if (v <= 0) return 1; const p = Math.pow(10, Math.floor(Math.log10(v))), f = v / p; return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 2.5 ? 2.5 : f <= 5 ? 5 : 10) * p; }
 const tick = v => S.metric === 'sales' && v >= 10000 ? (v / 10000).toLocaleString('ja-JP') + '万' : n0(v);
-function columns(data, kind){
+function columns(data, kind, f = fmt, tk = tick, colName = metricName()){
   const max = niceMax(Math.max(...data.map(d => d.v), 0)), peak = data.reduce((a, d, i) => d.v > data[a].v ? i : a, 0);
   const every = Math.max(1, Math.ceil(data.length / (innerWidth < 520 ? 7 : 14)));   /* 目盛りの文字が重ならないよう間引く */
-  const gl = [0, .5, 1].map(f => `<div class="gl${f === 0 ? ' base' : ''}" style="bottom:${f * 100}%"><span class="num">${tick(max * f)}</span></div>`).join('');
-  const bars = data.map((d, i) => `<div class="slot" tabindex="0" data-tip="${esc(d.full)}|${esc(fmt(d.v))}" aria-label="${esc(d.full)} ${esc(fmt(d.v))}">
-      ${i === peak && d.v > 0 ? `<span class="peak num" style="bottom:${d.v / max * 100}%">${esc(fmt(d.v))}</span>` : ''}
+  const gl = [0, .5, 1].map(g => `<div class="gl${g === 0 ? ' base' : ''}" style="bottom:${g * 100}%"><span class="num">${tk(max * g)}</span></div>`).join('');
+  const bars = data.map((d, i) => `<div class="slot" tabindex="0" data-tip="${esc(d.full)}|${esc(f(d.v))}" aria-label="${esc(d.full)} ${esc(f(d.v))}">
+      ${i === peak && d.v > 0 ? `<span class="peak num" style="bottom:${d.v / max * 100}%">${esc(f(d.v))}</span>` : ''}
       <div class="c" style="height:${d.v / max * 100}%${d.v > 0 ? ';min-height:2px' : ''}"></div></div>`).join('');
   const xs = data.map((d, i) => `<span>${i % every === 0 ? esc(d.label) : ''}</span>`).join('');
-  const table = `<details class="tv"><summary>数値を表で見る</summary><table><thead><tr><th class="l">${kind === 'hour' ? '時間帯' : '日付'}</th><th>${metricName()}</th></tr></thead>
-    <tbody>${data.map(d => `<tr><td class="l">${esc(d.full)}</td><td class="num">${esc(fmt(d.v))}</td></tr>`).join('')}</tbody></table></details>`;
+  const table = `<details class="tv"><summary>数値を表で見る</summary><table><thead><tr><th class="l">${kind === 'hour' ? '時間帯' : '日付'}</th><th>${esc(colName)}</th></tr></thead>
+    <tbody>${data.map(d => `<tr><td class="l">${esc(d.full)}</td><td class="num">${esc(f(d.v))}</td></tr>`).join('')}</tbody></table></details>`;
   return `<div class="cols">${gl}<div class="row">${bars}</div></div><div class="xaxis">${xs}</div>${table}`;
 }
 
@@ -503,6 +570,13 @@ $('#groups').addEventListener('click', e => { const b = e.target.closest('[data-
 $('#metric').addEventListener('click', e => { const b = e.target.closest('[data-m]'); if (!b) return; S.metric = b.dataset.m; savePrefs(); render(); });
 $('#rank').addEventListener('click', e => { const b = e.target.closest('[data-sort]'); if (!b) return; S.metric = b.dataset.sort; savePrefs(); render(); });
 $('#reload').addEventListener('click', () => load(true));
+/* 提供時間の目標(何分以内に提供できたか)。端末ごとに覚える */
+(() => {
+  const opts = [3, 5, 7, 10, 12, 15, 20, 25, 30, 40, 45, 60];
+  if (!opts.includes(S.late)) opts.push(S.late), opts.sort((a, b) => a - b);
+  $('#target').innerHTML = opts.map(m => `<option value="${m}"${m === S.late ? ' selected' : ''}>${m}</option>`).join('');
+  $('#target').addEventListener('change', e => { S.late = Number(e.target.value); savePrefs(); render(); });
+})();
 let rz; addEventListener('resize', () => { clearTimeout(rz); rz = setTimeout(() => { if (A) render(); }, 200); });
 
 /* CSV(Excelでそのまま開けるように先頭にBOMを付ける) */
