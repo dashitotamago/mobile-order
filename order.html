@@ -215,6 +215,11 @@ button:disabled{cursor:default}
   <p>ご来店ありがとうございました。<br>追加でご注文される場合は、卓上のQRコードをもう一度読み取ってください。</p>
   <button class="primary" data-act="rescan">メニューを開き直す</button>
 </div>
+<div class="ended" id="closed" hidden role="dialog" aria-modal="true" aria-labelledby="closedTitle">
+  <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9.5"/><path d="M12 7.5V12l3 2"/></svg>
+  <h2 id="closedTitle">ただいまご案内の準備中です</h2>
+  <p>スタッフがお席の準備をすると、この画面から注文できるようになります。しばらくお待ちください。</p>
+</div>
 
 <script>
 /* ===== 設定(config.js で上書き) ===== */
@@ -319,7 +324,7 @@ const CART_KEY = 'mo_cart_' + TABLE;
 const S = { menu:[], sig:'', group:'all', cart:{}, draft:null, pendingId:null, sending:false, view:null, tbl:null, session:null, ended:false, cartSession:null };
 (() => { const c = store.get(CART_KEY, null); if (c && Date.now() - c.at < 2 * 3600e3) { S.cart = c.lines || {}; S.cartSession = c.session || null; } })();
 /* 注文できる状態か(Firebase版は卓の情報が届いていて、会計済になっていないこと) */
-const canOrder = () => !!TABLE && (MODE !== 'fb' || (!!S.tbl && !S.ended));
+const canOrder = () => !!TABLE && (MODE !== 'fb' || (!!S.tbl && S.tbl.open && !S.ended && S.session !== null));
 const tableName = () => MODE === 'fb' ? (S.tbl ? S.tbl.name : '') : TABLE;
 const byId = id => S.menu.find(m => m.id === id);
 const cartLines = () => Object.values(S.cart).filter(l => byId(l.id));
@@ -580,10 +585,13 @@ function onTable(t){
   S.tbl = t; $('#noTable').hidden = true;
   $('#tableChip').hidden = false; $('#tableChip').textContent = '卓 ' + t.name;
   if (S.session === null) {
+    /* まだ来店の区切りを受け取っていない:利用中なら受け取って注文開始、空席なら案内を待つ */
+    if (!t.open) { $('#closed').hidden = false; document.body.style.overflow = 'hidden'; return; }
+    $('#closed').hidden = true; document.body.style.overflow = '';
     S.session = t.session;
     if (S.cartSession && S.cartSession !== t.session) { S.cart = {}; }   /* 前回の来店のカートは使わない */
     saveCart();
-  } else if (t.session !== S.session) showEnded();
+  } else if (t.session !== S.session || !t.open) showEnded();   /* 会計済・空席になった */
   else if (S.ended) hideEnded();
 }
 if (MODE === 'fb') {
