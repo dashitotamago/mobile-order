@@ -60,6 +60,38 @@ async function resetPass(email) {
 async function idToken() { await authReady; return auth.currentUser && !auth.currentUser.isAnonymous ? auth.currentUser.getIdToken() : ''; }
 const staffEmail = () => auth.currentUser && !auth.currentUser.isAnonymous ? auth.currentUser.email : '';
 
+/* ---------- LINEログイン・顧客情報 ----------
+ * お客様はLINEでログインし、GASが確認して発行した鍵(カスタムトークン)でFirebaseにログインする。
+ * 顧客情報は customers/{お客様ID} に保存し、本人とスタッフだけが読める。 */
+const CUSTOMERS = F.collection(db, 'customers');
+async function signInLine(token) { await authReady; const c = await A.signInWithCustomToken(auth, token); return c.user.uid; }
+const myUid = () => auth.currentUser ? auth.currentUser.uid : '';
+const isLineUser = () => !!auth.currentUser && /^line_/.test(auth.currentUser.uid);
+async function getCustomer(uid) { const s = await timeout(F.getDoc(F.doc(CUSTOMERS, uid))); return s.exists() ? s.data() : null; }
+async function createCustomer(uid, data) {
+  await timeout(F.setDoc(F.doc(CUSTOMERS, uid), { ...data, visits: 0, spent: 0, lastSession: '', lastVisitAt: null, createdAt: F.serverTimestamp(), updatedAt: F.serverTimestamp() }));
+  return { ok: true };
+}
+async function updateProfile(uid, data) { await timeout(F.updateDoc(F.doc(CUSTOMERS, uid), { ...data, updatedAt: F.serverTimestamp() })); return { ok: true }; }
+/* 注文のたびに呼ぶ:来店(卓の区切り)が新しければ来店回数を1増やし、注文額を足す */
+async function recordOrder(uid, { session, amount }) {
+  const ref = F.doc(CUSTOMERS, uid), cur = await F.getDoc(ref).catch(() => null);
+  if (!cur || !cur.exists()) return;
+  const d = { spent: F.increment(Math.max(0, Math.round(amount) || 0)), updatedAt: F.serverTimestamp() };
+  if (cur.data().lastSession !== session) Object.assign(d, { visits: F.increment(1), lastSession: session, lastVisitAt: F.serverTimestamp() });
+  await timeout(F.updateDoc(ref, d)).catch(() => {});
+}
+function watchCustomers(cb, onErr) {
+  return F.onSnapshot(CUSTOMERS, s => cb(s.docs.map(d => { const x = d.data({ serverTimestamps: 'estimate' });
+    return { uid: d.id, ...x, createdAt: x.createdAt ? ms(x.createdAt) : 0, lastVisitAt: x.lastVisitAt ? ms(x.lastVisitAt) : 0, consentAt: x.consentAt ? ms(x.consentAt) : 0 }; })),
+    e => onErr && onErr(err(e)));
+}
+/* ある顧客の注文明細(よく頼む商品を出すため) */
+async function customerLines(uid) {
+  const s = await timeout(F.getDocs(F.query(LINES, F.where('uid', '==', uid))), 20000);
+  return s.docs.map(toLine).filter(l => !l.call && !l.seat);
+}
+
 /* ---------- メニュー ---------- */
 function watchMenu(cb, onErr) {
   return F.onSnapshot(MENU, s => cb(s.exists() ? (s.data().list || []) : [], s.metadata.fromCache), e => onErr && onErr(err(e)));
@@ -67,6 +99,16 @@ function watchMenu(cb, onErr) {
 async function getMenu() {
   const s = await F.getDoc(MENU);
   return s.exists() ? (s.data().list || []) : [];
+}
+/* 1品の売り切れを切り替える(会計画面から)。同時に他の端末が保存しても消えないよう、最新のメニューを読んでから書く */
+async function setSold(id, sold) {
+  await timeout(F.runTransaction(db, async tx => {
+    const s = await tx.get(MENU); if (!s.exists()) throw new Error('メニューがありません');
+    const list = (s.data().list || []).map(m => m.id === id ? { ...m, sold } : m);
+    const p = {}; list.forEach(m => { p[m.id] = { n: m.name, pr: m.price, ok: !m.sold && !m.hidden }; });
+    tx.set(MENU, { ...s.data(), list, p, updatedAt: F.serverTimestamp(), updatedBy: staffEmail() });
+  }));
+  return { ok: true };
 }
 async function saveMenu(list) {
   const p = {};
@@ -255,5 +297,6 @@ function watchOnline(cb) {
 
 export { anon, watchStaff, login, logout, resetPass, idToken, staffEmail, watchMenu, getMenu, saveMenu,
   watchTable, watchTables, addTable, deleteTable, renameTable, openTable, closeTable, newSession, watchKitchen, watchHall, setCooked,
-  staffOrder, getSettings, saveSettings,
+  staffOrder, getSettings, saveSettings, setSold,
+  signInLine, myUid, isLineUser, getCustomer, createCustomer, updateProfile, recordOrder, watchCustomers, customerLines,
   placeOrder, callStaff, bill, watchPending, setServed, watchUnpaid, setPaid, getLines, watchOnline, err };
