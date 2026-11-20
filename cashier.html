@@ -134,6 +134,12 @@ input{font:inherit;font-size:16px;color:var(--text);background:var(--field);bord
 .entry>footer p{flex:1;font-size:14px;color:var(--mute)}
 .entry>footer p b{font-size:20px;color:var(--text);margin-left:4px}
 .entry>footer .addbtn{min-height:54px;padding:0 26px;font-size:17px}
+.mi.soldout{background:#4f2a21}
+.mi.soldout b{color:#ffd9cf}
+.mi em{font-style:normal;font-size:13px;font-weight:900;color:var(--ok, #58c27d)}
+.mi.soldout em{color:var(--alert)}
+.mi.busy{opacity:.5}
+.tbtn{min-height:46px;padding:0 16px;border-radius:10px;background:var(--chip);font-weight:700;font-size:15px}
 .entry .err{margin-top:12px;padding:10px 12px;border-radius:8px;background:#4f2a21;color:#ffd9cf;font-size:14px;font-weight:700}
 @media (prefers-reduced-motion:reduce){.snack{transition:none}}
 </style>
@@ -143,6 +149,7 @@ input{font:inherit;font-size:16px;color:var(--text);background:var(--field);bord
 <header class="bar">
   <h1 id="shopName"></h1>
   <p class="count">未会計<b id="nTables">0</b>卓 / 合計<b id="nSum">0円</b></p>
+  <button class="tbtn" id="soldBtn" hidden>売切の設定</button>
   <button class="addbtn" id="entryBtn" hidden>＋ 注文・席料を入力</button>
   <p class="stat" id="stat">接続中…</p>
 </header>
@@ -161,6 +168,14 @@ input{font:inherit;font-size:16px;color:var(--text);background:var(--field);bord
   <button class="primary" id="gateGo">ログイン</button>
 </div>
 
+<div class="entry" id="soldSheet" hidden role="dialog" aria-modal="true" aria-labelledby="soldTitle">
+  <header><h2 id="soldTitle">売切の設定</h2><button class="x" data-sclose aria-label="閉じる">✕</button></header>
+  <div class="body">
+    <p class="seatsum">商品を押すと「販売中」と「売切」が切り替わります。お客様の注文画面にすぐ反映され、売切の商品は注文できなくなります。</p>
+    <div class="chips" id="sCats" style="margin-top:12px"></div>
+    <div class="menu" id="sMenu" style="margin-top:14px"></div>
+  </div>
+</div>
 <div class="entry" id="entry" hidden role="dialog" aria-modal="true" aria-labelledby="entryTitle">
   <header><h2 id="entryTitle">注文・席料を入力</h2><button class="x" data-eclose aria-label="閉じる">✕</button></header>
   <div class="body">
@@ -380,6 +395,30 @@ $('#entry').addEventListener('click', e => {
 });
 $('#eSeatPrice').addEventListener('input', e => { E.seatPrice = e.target.value.replace(/[０-９]/g, d => '０１２３４５６７８９'.indexOf(d)).replace(/[^\d]/g, ''); e.target.value = E.seatPrice; renderEntry(); });
 $('#eSeatOn').addEventListener('change', e => { E.seatOn = e.target.checked; renderEntry(); });
+/* ===== 売切の設定(Firebase版) ===== */
+const SD = { cat:null, busy:new Set() };
+function renderSold(){
+  const list = (E.menuAll || []).filter(m => !m.hidden);
+  const cats = [...new Set(list.map(m => m.cat || 'その他'))], soldN = list.filter(m => m.sold).length;
+  if (SD.cat !== '__sold' && (!SD.cat || !cats.includes(SD.cat))) SD.cat = cats[0] || null;
+  $('#sCats').innerHTML = `<button class="chip" data-scat="__sold" aria-pressed="${SD.cat === '__sold'}">売切中<small>${soldN}</small></button>`
+    + cats.map(c => `<button class="chip" data-scat="${esc(c)}" aria-pressed="${c === SD.cat}">${esc(c)}</button>`).join('');
+  const items = SD.cat === '__sold' ? list.filter(m => m.sold) : list.filter(m => (m.cat || 'その他') === SD.cat);
+  $('#sMenu').innerHTML = items.map(m => `<button class="mi${m.sold ? ' soldout' : ''}${SD.busy.has(m.id) ? ' busy' : ''}" data-sold="${esc(m.id)}"${SD.busy.has(m.id) ? ' disabled' : ''}>
+      <b>${esc(m.name)}</b><em>${m.sold ? '売切' : '販売中'}</em></button>`).join('')
+    || `<p class="seatsum">${SD.cat === '__sold' ? '売切中の商品はありません。' : '商品がありません。'}</p>`;
+}
+$('#soldBtn').addEventListener('click', () => { $('#soldSheet').hidden = false; document.body.style.overflow = 'hidden'; renderSold(); });
+$('#soldSheet').addEventListener('click', async e => {
+  if (e.target.closest('[data-sclose]')) { $('#soldSheet').hidden = true; document.body.style.overflow = ''; return; }
+  const c = e.target.closest('[data-scat]'); if (c) { SD.cat = c.dataset.scat; return renderSold(); }
+  const b = e.target.closest('[data-sold]'); if (!b) return;
+  const m = (E.menuAll || []).find(x => x.id === b.dataset.sold); if (!m || SD.busy.has(m.id)) return;
+  SD.busy.add(m.id); renderSold();
+  try { await (await FBP).setSold(m.id, !m.sold); snack(`「${m.name}」を${m.sold ? '販売中' : '売切'}にしました`); }
+  catch (er) { snack('変更できませんでした。通信状況を確認して、もう一度押してください。'); }
+  SD.busy.delete(m.id); renderSold();
+});
 $('#entryBtn').addEventListener('click', () => openEntry(S.sel ? S.tables.find(x => x.table === S.sel)?.lines.find(l => l.tableId)?.tableId : null, 'menu'));
 $('#eSend').addEventListener('click', async () => {
   if (E.sending) return;
@@ -397,7 +436,7 @@ $('#eSend').addEventListener('click', async () => {
     $('#eErr').hidden = false; $('#eErr').textContent = er && er.message && !/^[a-z-]+$/.test(er.message) ? er.message : '送信できませんでした。通信状況を確認して、もう一度押してください。';
   }
 });
-document.addEventListener('keydown', e => { if (e.key === 'Escape' && !$('#entry').hidden) closeEntry(); });
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && !$('#entry').hidden) closeEntry(); if (e.key === 'Escape' && !$('#soldSheet').hidden) { $('#soldSheet').hidden = true; document.body.style.overflow = ''; } });
 
 /* ===== 会計済 / 取り消し ===== */
 async function pay(){
@@ -452,7 +491,8 @@ if (MODE === 'fb') {
       if (!off) {
         $('#entryBtn').hidden = false;
         fb.watchTables(list => { E.tables = list; if (!$('#entry').hidden) renderEntry(); });
-        fb.watchMenu(list => { E.menu = list.filter(m => !m.hidden); if (!$('#entry').hidden) renderEntry(); });
+        fb.watchMenu(list => { E.menuAll = list; E.menu = list.filter(m => !m.hidden); if (!$('#entry').hidden) renderEntry(); if (!$('#soldSheet').hidden) renderSold(); });
+        $('#soldBtn').hidden = false;
         fb.getSettings().then(st => { if (st.seatFee != null) E.settingsPrice = Number(st.seatFee); });
       }
       if (!off) off = fb.watchUnpaid((lines, cached) => { applyLines(lines); cached ? stat(false, '通信できません。Wi-Fiを確認してください(最後に届いた内容を表示中)') : stat(true, 'リアルタイム受信中'); },
